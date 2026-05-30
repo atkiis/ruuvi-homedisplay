@@ -1,0 +1,267 @@
+/* ── Reset & base ──────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #0d1117;
+  --surface:     #161b22;
+  --border:      #30363d;
+  --text:        #e6edf3;
+  --text-muted:  #8b949e;
+  --accent:      #58a6ff;
+  --green:       #3fb950;
+  --yellow:      #d29922;
+  --orange:      #f0883e;
+  --red:         #f85149;
+  --blue:        #388bfd;
+  --radius:      12px;
+  --gap:         16px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 16px;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.clock {
+  font-size: 2.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2px;
+}
+
+.date {
+  font-size: 1.3rem;
+  color: var(--text-muted);
+}
+
+.demo-badge {
+  margin-left: auto;
+  background: var(--yellow);
+  color: #000;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+/* ── Main grid ───────────────────────────────────────────────────────────── */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap);
+  padding: var(--gap);
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+@media (min-width: 1024px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+  .ruuvi-section     { grid-column: 1 / 2; }
+  .electricity-section { grid-column: 2 / 3; }
+  .buses-section     { grid-column: 1 / -1; }
+}
+
+/* ── Section ─────────────────────────────────────────────────────────────── */
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+/* ── Ruuvi cards ─────────────────────────────────────────────────────────── */
+  .ruuvi-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--gap);
+}
+
+.ruuvi-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-icon  { font-size: 2rem; line-height: 1; }
+.card-name  { font-size: 1.1rem; font-weight: 600; }
+
+.card-temp {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.temp-value {
+  font-size: 2.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.temp-unit  { font-size: 1.2rem; color: var(--text-muted); }
+
+/* Colour the temperature based on data-* set by JS */
+.ruuvi-card[data-temp-level="cold"]  .temp-value { color: var(--blue); }
+.ruuvi-card[data-temp-level="cool"]  .temp-value { color: var(--accent); }
+.ruuvi-card[data-temp-level="warm"]  .temp-value { color: var(--green); }
+.ruuvi-card[data-temp-level="hot"]   .temp-value { color: var(--orange); }
+.ruuvi-card[data-temp-level="vhot"]  .temp-value { color: var(--red); }
+
+/* Gauge bar */
+.gauge-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.gauge-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue) 0%, var(--green) 40%, var(--orange) 75%, var(--red) 100%);
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Stats row */
+.card-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.stat        { display: flex; flex-direction: column; }
+.stat-label  { font-size: 0.7rem; color: var(--text-muted); }
+.stat-value  { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+
+.card-updated {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+/* ── Electricity ─────────────────────────────────────────────────────────── */
+.elec-summary {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.elec-label       { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+.elec-current     { font-size: 2.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.elec-rank        { font-size: 0.8rem; color: var(--text-muted); }
+.elec-range       { font-size: 1rem; font-variant-numeric: tabular-nums; padding-top: 4px; }
+
+/* Electricity price colour levels */
+.price-cheap  { color: var(--green); }
+.price-ok     { color: var(--accent); }
+.price-mid    { color: var(--yellow); }
+.price-high   { color: var(--orange); }
+.price-vhigh  { color: var(--red); }
+
+.elec-chart-wrap {
+  position: relative;
+  height: 180px;
+}
+
+/* ── Bus stops ───────────────────────────────────────────────────────────── */
+.buses-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--gap);
+}
+
+.bus-stop {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.stop-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.stop-id {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.dep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.dep-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.dep-table td {
+  padding: 6px 6px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.dep-table tr:last-child td { border-bottom: none; }
+
+.route-badge {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--bg);
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.realtime-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  margin-right: 4px;
+  vertical-align: middle;
+}
+td.minutes-now  { color: var(--green);  font-weight: 700; }
+td.minutes-soon { color: var(--yellow); }
+td.minutes-gone { color: var(--text-muted); text-decoration: line-through; }
+
+.loading { color: var(--text-muted); font-style: italic; }
+.error   { color: var(--red); font-size: 0.85rem; }

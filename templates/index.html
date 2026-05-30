@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Home Display</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="clock" id="clock">--:--</div>
+  <div class="date"  id="date">--.--.----</div>
+  {% if demo_mode %}
+  <div class="demo-badge">DEMO&nbsp;MODE</div>
+  {% endif %}
+</header>
+
+<main class="grid">
+
+  <!-- ── Ruuvi sensor cards ──────────────────────────────────────────────── -->
+  <section class="section ruuvi-section">
+    <h2 class="section-title">Sensors</h2>
+    <div class="ruuvi-cards" id="ruuvi-cards">
+      {% for key, tag in tags.items() %}
+      <div class="card ruuvi-card" id="card-{{ key }}" data-key="{{ key }}">
+        <div class="card-icon">{{ tag.icon }}</div>
+        <div class="card-name">{{ tag.name }}</div>
+        <div class="card-temp">
+          <span class="temp-value" id="{{ key }}-temp">--</span>
+          <span class="temp-unit">°C</span>
+        </div>
+        <div class="card-gauge">
+          <div class="gauge-bar">
+            <div class="gauge-fill" id="{{ key }}-gauge" style="width:0%"></div>
+          </div>
+          <div class="gauge-labels">
+            <span>{{ tag.temp_min }}°</span>
+            <span>{{ tag.temp_max }}°</span>
+          </div>
+        </div>
+        <div class="card-stats">
+          <div class="stat">
+            <span class="stat-label">Humidity</span>
+            <span class="stat-value" id="{{ key }}-hum">--%</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Pressure</span>
+            <span class="stat-value" id="{{ key }}-pres">-- hPa</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Battery</span>
+            <span class="stat-value" id="{{ key }}-bat">-- V</span>
+          </div>
+        </div>
+        <div class="card-updated" id="{{ key }}-updated">No data yet</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- ── Electricity price ───────────────────────────────────────────────── -->
+  <section class="section electricity-section">
+    <h2 class="section-title">Electricity Price (Finland)</h2>
+    <div class="elec-summary">
+      <div class="elec-current-wrap">
+        <div class="elec-label">Now</div>
+        <div class="elec-current" id="elec-current">-- c/kWh</div>
+        <div class="elec-rank"   id="elec-rank"></div>
+      </div>
+      <div class="elec-range-wrap">
+        <div class="elec-label">Today</div>
+        <div class="elec-range" id="elec-range">min -- / max --</div>
+      </div>
+    </div>
+    <div class="elec-chart-wrap">
+      <canvas id="elec-chart"></canvas>
+    </div>
+  </section>
+
+  <!-- ── Bus stops ───────────────────────────────────────────────────────── -->
+  <section class="section buses-section">
+    <h2 class="section-title">Bus Schedules</h2>
+    <div class="buses-grid" id="buses-grid">
+      {% for stop in bus_stops %}
+      <div class="bus-stop" id="stop-{{ loop.index }}">
+        <div class="stop-name">{{ stop.name }}</div>
+        <div class="stop-id">({{ stop.id }})</div>
+        <table class="dep-table">
+          <thead>
+            <tr>
+              <th>Route</th>
+              <th>Destination</th>
+              <th>Time</th>
+              <th>Min</th>
+            </tr>
+          </thead>
+          <tbody id="stop-{{ loop.index }}-rows">
+            <tr><td colspan="4" class="loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // Pass server config to the JS module.
+  const REFRESH_INTERVAL = {{ refresh_interval }};
+  const RUUVI_KEYS = {{ tags.keys() | list | tojson }};
+  const TAG_CONFIG  = {{ tags | tojson }};
+</script>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>
