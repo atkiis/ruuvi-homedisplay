@@ -103,7 +103,9 @@ def _ble_loop() -> None:
 
     while True:
         try:
-            RuuviTagSensor.find_ruuvitags_and_handle_data(_handle)
+            # get_data() runs forever, invoking _handle((mac, data)) for every
+            # advertisement. Passing macs limits it to our configured tags.
+            RuuviTagSensor.get_data(_handle, macs)
         except Exception as exc:  # noqa: BLE001
             logger.warning("BLE scan error: %s – retrying in 10 s.", exc)
             time.sleep(10)
