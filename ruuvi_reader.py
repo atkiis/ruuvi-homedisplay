@@ -7,6 +7,7 @@ simulated demo data when DEMO_MODE is enabled in config.py or when the
 ruuvitag-sensor library is not available / no BLE hardware is present.
 """
 
+import asyncio
 import logging
 import math
 import random
@@ -87,8 +88,7 @@ def _ble_loop() -> None:
     macs = [cfg["mac"].upper() for cfg in config.RUUVI_TAGS.values()]
     logger.info("Scanning for Ruuvi tags: %s", macs)
 
-    def _handle(found: tuple) -> None:
-        mac, data = found
+    def _store(mac: str, data: dict) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with _lock:
             _latest[mac.upper()] = {
@@ -101,11 +101,17 @@ def _ble_loop() -> None:
             }
         logger.debug("Updated %s: %.1f°C", mac, data.get("temperature", 0))
 
+    async def _scan() -> None:
+        # get_data_async() is an async generator yielding (mac, data) tuples for
+        # every advertisement. It works with the default bleak backend, unlike
+        # the synchronous get_data() which needs a sync (BlueZ) adapter and
+        # raises "sync BLE adapter required" when bleak is installed.
+        async for mac, data in RuuviTagSensor.get_data_async(macs):
+            _store(mac, data)
+
     while True:
         try:
-            # get_data() runs forever, invoking _handle((mac, data)) for every
-            # advertisement. Passing macs limits it to our configured tags.
-            RuuviTagSensor.get_data(_handle, macs)
+            asyncio.run(_scan())
         except Exception as exc:  # noqa: BLE001
             logger.warning("BLE scan error: %s – retrying in 10 s.", exc)
             time.sleep(10)
