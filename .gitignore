@@ -28,3 +28,4 @@ Thumbs.db
 # App
 *.log
 instance/
+config.py
