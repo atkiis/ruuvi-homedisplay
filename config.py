@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# config.py – Application configuration
+#
+# Edit the values below to match your setup before running the app.
+# ---------------------------------------------------------------------------
+
+# ── Ruuvi tags ──────────────────────────────────────────────────────────────
+# Replace MAC addresses with the ones printed on the back of your tags.
+# temp_min / temp_max define the expected range shown as a gauge on the UI.
+
+RUUVI_TAGS = {
+    "sauna": {
+        "mac": "AA:BB:CC:DD:EE:01",   # ← replace with actual MAC
+        "name": "Sauna",
+        "icon": "🔥",
+        "temp_min": 20,
+        "temp_max": 120,
+    },
+    "balcony": {
+        "mac": "AA:BB:CC:DD:EE:02",   # ← replace with actual MAC
+        "name": "Balcony",
+        "icon": "🌤",
+        "temp_min": -50,
+        "temp_max": 50,
+    },
+    "freezer": {
+        "mac": "AA:BB:CC:DD:EE:03",   # ← replace with actual MAC
+        "name": "Freezer",
+        "icon": "❄️",
+        "temp_min": -40,
+        "temp_max": 10,
+    },
+}
+
+# How often the background Ruuvi scan should attempt to read fresh data (seconds).
+RUUVI_SCAN_INTERVAL = 60
+
+# ── Bus stops ───────────────────────────────────────────────────────────────
+# Use the Digitransit stop finder to get your stop IDs:
+#   https://reittiopas.hsl.fi  (HSL area)
+# or query the stops by name:
+#   https://api.digitransit.fi/routing/v1/routers/hsl/index/graphql
+#
+# For cities outside the HSL area (Tampere, Oulu, …) change DIGITRANSIT_API_URL
+# to the corresponding router below.
+
+BUS_STOPS = [
+    {
+        "id": "HSL:1040602",   # ← replace with your nearest stop ID
+        "name": "Bus Stop 1",  # ← human-readable label shown on screen
+    },
+    {
+        "id": "HSL:1040603",   # ← replace with your nearest stop ID
+        "name": "Bus Stop 2",
+    },
+]
+
+# Number of next departures to show per stop.
+BUS_DEPARTURES_COUNT = 6
+
+# ── Digitransit API ─────────────────────────────────────────────────────────
+# HSL (Helsinki metropolitan area):
+DIGITRANSIT_API_URL = "https://api.digitransit.fi/routing/v1/routers/hsl/index/graphql"
+# Tampere: "https://api.digitransit.fi/routing/v1/routers/waltti/index/graphql"
+# Oulu / national: "https://api.digitransit.fi/routing/v1/routers/finland/index/graphql"
+
+# Optional subscription key – required for production use; see
+# https://portal-api.digitransit.fi/  (free registration).
+# Leave empty for low-volume development / home use.
+DIGITRANSIT_API_KEY = ""
+
+# ── Electricity price API ───────────────────────────────────────────────────
+# spot-hinta.fi is a free, open Finnish electricity price API.
+ELECTRICITY_API_URL = "https://api.spot-hinta.fi/Today"
+
+# ── General display settings ────────────────────────────────────────────────
+# Page auto-refresh interval in seconds (also controls polling from browser).
+REFRESH_INTERVAL = 60
+
+# Set to True to use simulated sensor data (useful when Bluetooth is unavailable).
+DEMO_MODE = True
