@@ -499,10 +499,23 @@ def _draw_buses(draw, x: int, y: int, w: int, h: int) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+_NIGHT_START = 22  # inclusive (hour in Helsinki time)
+_NIGHT_END = 6     # exclusive (resume at this hour)
+
+
+def is_night_mode() -> bool:
+    """Return True between 22:00 and 06:00 Helsinki time."""
+    hour = datetime.now(tz=_HELSINKI).hour
+    return hour >= _NIGHT_START or hour < _NIGHT_END
+
+
 def render() -> Image.Image:
     """Build and return the full dashboard image as an RGB ``PIL.Image``."""
     w = config.EPAPER_WIDTH
     h = config.EPAPER_HEIGHT
+
+    if is_night_mode():
+        return Image.new("RGB", (w, h), WHITE)
 
     img = Image.new("RGB", (w, h), WHITE)
     draw = ImageDraw.Draw(img)
