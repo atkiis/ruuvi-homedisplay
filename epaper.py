@@ -45,6 +45,12 @@ WHITE = (255, 255, 255)
 GREY = (110, 110, 110)
 RED = (200, 0, 0)
 
+# Electricity price thresholds for tiered bar fills on monochrome e-ink (c/kWh,
+# tax-included).  Bars below CHEAP are hollow; CHEAP–EXPENSIVE are hatched;
+# above EXPENSIVE are solid.  Adjust to match your local price expectations.
+ELEC_CHEAP_THRESHOLD = 8.0
+ELEC_EXPENSIVE_THRESHOLD = 18.0
+
 # Candidate TrueType fonts. Pillow does not ship a scalable font on every
 # platform, so we probe a few common locations and fall back to the bundled
 # bitmap default if none are found.
@@ -405,6 +411,14 @@ def _draw_electricity(draw, x: int, y: int, w: int, h: int) -> None:
     else:
         zero_y = baseline
 
+    # Horizontal guide lines at price tier boundaries so the chart reads
+    # clearly on a monochrome panel without any colour cues.
+    for ref_price in [ELEC_CHEAP_THRESHOLD, ELEC_EXPENSIVE_THRESHOLD]:
+        if vmin < ref_price < vmax:
+            ref_y = baseline - int((ref_price - vmin) / span * chart_h)
+            if chart_top <= ref_y <= chart_bottom:
+                draw.line([(x, ref_y), (x + w, ref_y)], fill=GREY, width=1)
+
     bx = x
     for hh in hours:
         val = hh["price_with_tax"]
@@ -416,14 +430,21 @@ def _draw_electricity(draw, x: int, y: int, w: int, h: int) -> None:
             top, bottom = zero_y, zero_y + bar_px
 
         if hh.get("is_current"):
-            # Outlined current hour so it stands out on a 1-bit panel.
+            # Solid fill + thick border – unmistakeable on a 1-bit panel.
             draw.rectangle([bx, top, bx + bar_w, bottom], fill=BLACK)
             draw.rectangle([bx - 1, min(top, zero_y) - 4, bx + bar_w + 1, max(bottom, zero_y)],
                            outline=BLACK, width=2)
-        elif config.EPAPER_COLOR and val >= 20:
-            draw.rectangle([bx, top, bx + bar_w, bottom], fill=RED)
+        elif val >= ELEC_EXPENSIVE_THRESHOLD:
+            # Expensive hour: solid fill (replaces RED on colour panels).
+            draw.rectangle([bx, top, bx + bar_w, bottom],
+                           fill=RED if config.EPAPER_COLOR else BLACK)
+        elif val >= ELEC_CHEAP_THRESHOLD:
+            # Moderate hour: hatched fill – outline plus horizontal stripes.
+            draw.rectangle([bx, top, bx + bar_w, bottom], outline=BLACK, width=1)
+            for hy in range(top + 2, bottom - 1, 4):
+                draw.line([(bx + 1, hy), (bx + bar_w - 1, hy)], fill=BLACK, width=1)
         else:
-            # Hollow bars for normal hours keep the chart light and readable.
+            # Cheap hour: hollow outline only.
             draw.rectangle([bx, top, bx + bar_w, bottom], outline=BLACK, width=1)
 
         bx += bar_w + gap
@@ -499,7 +520,7 @@ def _draw_buses(draw, x: int, y: int, w: int, h: int) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-_NIGHT_START = 22  # inclusive (hour in Helsinki time)
+_NIGHT_START = 23  # inclusive (hour in Helsinki time)
 _NIGHT_END = 6     # exclusive (resume at this hour)
 
 
@@ -515,7 +536,13 @@ def render() -> Image.Image:
     h = config.EPAPER_HEIGHT
 
     if is_night_mode():
-        return Image.new("RGB", (w, h), WHITE)
+        # Show a minimal clock so the display is not completely blank at night.
+        img = Image.new("RGB", (w, h), WHITE)
+        draw = ImageDraw.Draw(img)
+        now = datetime.now(tz=_HELSINKI)
+        _text(draw, (w // 2, h // 2 - 24), now.strftime("%H:%M"), 80, bold=True, anchor="mm")
+        _text(draw, (w // 2, h // 2 + 44), _fi_date(now), 22, fill=GREY, anchor="mm")
+        return img
 
     img = Image.new("RGB", (w, h), WHITE)
     draw = ImageDraw.Draw(img)
@@ -553,9 +580,10 @@ def render_bmp(mono: bool = True) -> bytes:
     """Return a BMP. ``mono`` produces a 1-bit image for bare e-ink sketches."""
     img = render()
     if mono:
-        # Convert to pure black/white with a 50% threshold (no dithering so text
-        # stays crisp on the panel).
-        img = img.convert("L").point(lambda p: 255 if p > 128 else 0, mode="1")
+        # Floyd-Steinberg dithering preserves the tonal hierarchy of grey labels
+        # and icons (they dither to a lighter pattern instead of collapsing to
+        # solid black) while keeping bold text crisp at 800×480 resolution.
+        img = img.convert("1")
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()
