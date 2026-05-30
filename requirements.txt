@@ -1,3 +1,4 @@
 flask>=3.0.0
 requests>=2.31.0
 ruuvitag-sensor>=2.3.1
+pillow>=10.1.0

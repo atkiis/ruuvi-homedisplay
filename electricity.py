@@ -56,19 +56,33 @@ def get_prices() -> dict:
 
 
 def _parse(raw: list) -> dict:
-    hours = []
+    # The API now reports prices at 15-minute resolution (96 entries/day) in
+    # €/kWh. The dashboard is built around 24 hourly bars, so average the
+    # quarter-hour values into hourly buckets and convert €/kWh → c/kWh (so the
+    # colour thresholds of 5 / 12 / 20 / 30 c/kWh stay meaningful).
+    buckets: dict[int, dict] = {}
     for entry in raw:
         dt_str = entry.get("DateTime", "")
         try:
             dt = datetime.fromisoformat(dt_str)
         except ValueError:
             continue
+        b = buckets.setdefault(
+            dt.hour,
+            {"datetime": dt_str, "no_tax": [], "with_tax": []},
+        )
+        b["no_tax"].append(entry.get("PriceNoTax", 0.0) * 100)
+        b["with_tax"].append(entry.get("PriceWithTax", 0.0) * 100)
+
+    hours = []
+    for hour, b in buckets.items():
+        n = len(b["with_tax"]) or 1
         hours.append(
             {
-                "hour": dt.hour,
-                "datetime": dt_str,
-                "price_no_tax": round(entry.get("PriceNoTax", 0.0), 3),
-                "price_with_tax": round(entry.get("PriceWithTax", 0.0), 3),
+                "hour": hour,
+                "datetime": b["datetime"],
+                "price_no_tax": round(sum(b["no_tax"]) / n, 2),
+                "price_with_tax": round(sum(b["with_tax"]) / n, 2),
                 "is_current": False,
             }
         )

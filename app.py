@@ -10,11 +10,12 @@ Or with a production WSGI server:
 
 import logging
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, Response
 
 import buses
 import config
 import electricity
+import epaper
 import ruuvi_reader
 
 logging.basicConfig(
@@ -65,8 +66,43 @@ def api_buses():
 
 
 # ---------------------------------------------------------------------------
+# E-paper endpoints (Seeed reTerminal E1001 and similar e-ink panels)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/epaper.png")
+def epaper_png():
+    return Response(epaper.render_png(), mimetype="image/png")
+
+
+@app.route("/epaper.bmp")
+def epaper_bmp():
+    return Response(epaper.render_bmp(mono=not config.EPAPER_COLOR), mimetype="image/bmp")
+
+
+@app.route("/epaper")
+def epaper_preview():
+    """Simple HTML wrapper to preview the e-paper image in a desktop browser."""
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>E-paper preview</title>"
+        f"<meta http-equiv='refresh' content='{config.REFRESH_INTERVAL}'>"
+        "<style>body{background:#333;margin:0;display:flex;justify-content:center;"
+        "align-items:center;min-height:100vh}"
+        "img{image-rendering:pixelated;border:1px solid #000;background:#fff}</style>"
+        "</head><body>"
+        f"<img src='/epaper.png?t={{}}' width='{config.EPAPER_WIDTH}' "
+        f"height='{config.EPAPER_HEIGHT}'>"
+        "<script>setInterval(()=>{const i=document.querySelector('img');"
+        "i.src='/epaper.png?t='+Date.now();},"
+        f"{config.REFRESH_INTERVAL * 1000});</script>"
+        "</body></html>"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5001, debug=False)
