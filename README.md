@@ -105,15 +105,66 @@ Then open a Chromium kiosk window:
 chromium-browser --kiosk http://localhost:5000
 ```
 
+## Running on a Seeed reTerminal E1001 e-paper display
+
+The [reTerminal E1001](https://wiki.seeedstudio.com/) is a 7.5" **800×480
+monochrome e-paper** device built on an ESP32-S3. It is **not** a computer with a
+browser, so it can't load the HTML dashboard directly. Instead the board fetches
+a pre-rendered image from this server and draws it on the panel.
+
+The server exposes three extra endpoints (no extra services to run):
+
+| Endpoint | Use |
+|---|---|
+| `/epaper.png` | 800×480 image for ESPHome's `online_image` (recommended) |
+| `/epaper.bmp` | 1-bit BMP for bare Arduino sketches |
+| `/epaper` | HTML preview to tweak the layout in a desktop browser |
+
+The image is rendered for a small, slow, 1-bit screen: big high-contrast text,
+no emoji, a hand-drawn 24-hour electricity chart, and only the soonest bus
+departures. Adjust the panel in `config.py`:
+
+```python
+EPAPER_WIDTH  = 800     # panel width
+EPAPER_HEIGHT = 480     # panel height
+EPAPER_ROTATE = 0       # 90/180/270 if mounted sideways
+EPAPER_COLOR  = False   # True only for the 6-colour reTerminal E1002
+```
+
+Preview it locally before flashing anything:
+
+```bash
+python app.py
+# → open http://localhost:5001/epaper
+```
+
+### Flashing the device (ESPHome)
+
+A starter config lives in [esphome/ruuvi-homedisplay-e1001.yaml](esphome/ruuvi-homedisplay-e1001.yaml).
+It wakes the board on an interval, downloads `/epaper.png`, and refreshes the
+panel (e-ink holds the image with no power between updates). Edit the
+`substitutions:` block with your WiFi and the server URL, add Seeed's official
+reTerminal E1001 board/display definition where indicated, then:
+
+```bash
+esphome run esphome/ruuvi-homedisplay-e1001.yaml
+```
+
+> Because e-paper refreshes are slow and wear the panel, keep the update
+> interval generous (5–15 min). The sensor, electricity, and bus data all change
+> slowly enough that this is plenty.
+
 ## Architecture
 
 ```
 app.py                Flask application & routing
 config.py             All user-facing settings
 ruuvi_reader.py       Background BLE scan thread (or demo mode)
-electricity.py        Fetches/caches spot-hinta.fi prices
-buses.py              Fetches/caches Digitransit departures
-templates/index.html  Dashboard HTML
-static/css/style.css  Dark-theme CSS
+electricity.py         Fetches/caches spot-hinta.fi prices
+buses.py               Fetches/caches Digitransit departures
+epaper.py              Renders the 800x480 e-paper dashboard image
+templates/index.html   Dashboard HTML
+static/css/style.css   Dark-theme CSS
 static/js/dashboard.js  Auto-refresh & Chart.js rendering
+esphome/               ESPHome config for the reTerminal E1001
 ```

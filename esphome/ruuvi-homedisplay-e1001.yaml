@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ESPHome configuration for the Seeed reTerminal E1001 (7.5" 800x480 mono e-ink)
+# acting as a thin client for the ruuvi-homedisplay server.
+#
+# How it works:
+#   The reTerminal E1001 is an ESP32-S3 e-paper device and cannot run a browser.
+#   This config makes it periodically download the pre-rendered dashboard image
+#   from the Flask server (the /epaper.png endpoint) and draw it on the panel.
+#   Between refreshes the board sleeps to save battery — e-ink keeps the last
+#   image on screen with zero power.
+#
+# Before flashing:
+#   1. Add the official Seeed reTerminal E1001 base package below. Seeed ships an
+#      ESPHome example that defines the e-paper `display:` platform and the exact
+#      ESP32-S3 pin mapping for this board — see the "reTerminal E Series ESPHome"
+#      guide on wiki.seeedstudio.com and copy its `esp32:`, `spi:` and `display:`
+#      blocks (or include it as a remote `packages:` entry). Those board specifics
+#      are intentionally NOT guessed here.
+#   2. Set your WiFi credentials and the server URL in the `substitutions:` block.
+#   3. flash with:  esphome run ruuvi-homedisplay-e1001.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+substitutions:
+  device_name: ruuvi-homedisplay
+  # IP or hostname of the machine running app.py, including the port.
+  server_url: "http://192.168.1.50:5001/epaper.png"
+  # How often to wake, re-download the image and refresh the panel.
+  # E-ink wears with refreshes and the data only changes slowly, so keep this
+  # generous (5–15 min is plenty for sensors / electricity / buses).
+  refresh_interval: "10min"
+
+esphome:
+  name: ${device_name}
+
+# >>> Replace this comment block with Seeed's official reTerminal E1001 board
+# >>> definition (esp32 / spi / display platform + pins). The keys below are the
+# >>> integration glue that references a display with id `epaper`.
+
+logger:
+api:
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+time:
+  - platform: homeassistant   # or `sntp` if not using Home Assistant
+    id: esp_time
+
+# Download the dashboard image rendered by the Flask server.
+online_image:
+  - id: dashboard_image
+    url: ${server_url}
+    format: PNG
+    type: BINARY            # 1-bit; use RGB565 instead for the colour E1002
+    update_interval: never  # we trigger the download manually below
+    on_download_finished:
+      - component.update: epaper
+
+# NOTE: `display:` must be provided by Seeed's board package. It should look
+# roughly like this (model/pins come from their example):
+#
+# display:
+#   - platform: <seeed reterminal e-paper platform>
+#     id: epaper
+#     update_interval: never
+#     lambda: |-
+#       it.image(0, 0, id(dashboard_image));
+
+# Wake periodically, fetch a fresh image, then let the panel redraw.
+interval:
+  - interval: ${refresh_interval}
+    then:
+      - online_image.set_url:
+          id: dashboard_image
+          url: ${server_url}
+      - component.update: dashboard_image
+
+# Optional: deep sleep between refreshes for battery operation. Uncomment and
+# tune to match `refresh_interval`. Remove if the device is USB-powered and you
+# want it always reachable for OTA updates.
+#
+# deep_sleep:
+#   run_duration: 30s
+#   sleep_duration: ${refresh_interval}
