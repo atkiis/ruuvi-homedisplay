@@ -4,7 +4,7 @@ A full-screen home-display dashboard that shows:
 
 - **Ruuvi tag sensor data** (temperature, humidity, pressure, battery) – sauna, balcony, and freezer
 - **Finnish electricity spot prices** (hourly chart + current price, from [api.spot-hinta.fi](https://api.spot-hinta.fi))
-- **Bus stop schedules** for two nearby stops (via [Digitransit HSL API](https://digitransit.fi/en/developers/))
+- **Bus stop schedules** for two nearby stops (via the [Digitransit routing API](https://digitransit.fi/en/developers/); preconfigured for Tampere / Nysse via the Waltti feed)
 
 ## Screenshot layout
 
@@ -58,8 +58,8 @@ All settings live in **`config.py`**:
 |---|---|
 | `RUUVI_TAGS` | Tag names, MAC addresses, and expected temperature ranges |
 | `BUS_STOPS` | Digitransit stop IDs and display labels |
-| `DIGITRANSIT_API_URL` | Router URL (HSL / Waltti / Finland) |
-| `DIGITRANSIT_API_KEY` | Optional API key (see [Digitransit portal](https://portal-api.digitransit.fi/)) |
+| `DIGITRANSIT_API_URL` | Digitransit v2 endpoint (Waltti/Tampere by default; also HSL / Finland) |
+| `DIGITRANSIT_API_KEY` | **Required** API key (free, see [Digitransit portal](https://portal-api.digitransit.fi/)) |
 | `REFRESH_INTERVAL` | Page polling interval in seconds (default 60) |
 | `DEMO_MODE` | `True` → use simulated data (no Bluetooth required) |
 
@@ -70,13 +70,22 @@ Run the Ruuvi scanner once:
 sudo python -c "from ruuvitag_sensor.ruuvi import RuuviTagSensor; print(RuuviTagSensor.find_ruuvitags())"
 ```
 
+> **Digitransit now requires a (free) API key.** Register at the
+> [Digitransit portal](https://portal-api.digitransit.fi/), then set
+> `DIGITRANSIT_API_KEY` in `config.py`. Requests without a key return HTTP 401.
+
 ### Finding your bus stop IDs
 
-- **HSL (Helsinki region)**: search on [reittiopas.hsl.fi](https://reittiopas.hsl.fi) or use the Digitransit GraphQL API:
+- **Tampere (Nysse)**: this app is preconfigured for the Waltti feed
+  (`routing/v2/waltti/gtfs/v1`). Find stop IDs on
+  [reittiopas.tampere.fi](https://reittiopas.tampere.fi) or with the
+  [GraphiQL explorer](https://digitransit.fi/en/developers/apis/1-routing-api/1-graphiql/).
+  Waltti/Tampere stop IDs use the `tampere:` prefix:
   ```graphql
-  { stops(name: "Rautatientori") { gtfsId name code } }
+  { stops(name: "Keskustori") { gtfsId name code } }
   ```
-- **Other cities**: change `DIGITRANSIT_API_URL` to the correct router (see comments in `config.py`).
+- **Other regions**: change `DIGITRANSIT_API_URL` to the matching v2 endpoint —
+  HSL `routing/v2/hsl/gtfs/v1` or Finland-wide `routing/v2/finland/gtfs/v1`.
 
 ## Running on a display at boot (systemd)
 
@@ -162,6 +171,7 @@ config.py             All user-facing settings
 ruuvi_reader.py       Background BLE scan thread (or demo mode)
 electricity.py         Fetches/caches spot-hinta.fi prices
 buses.py               Fetches/caches Digitransit departures
+weather.py             Fetches/caches Open-Meteo forecast
 epaper.py              Renders the 800x480 e-paper dashboard image
 templates/index.html   Dashboard HTML
 static/css/style.css   Dark-theme CSS

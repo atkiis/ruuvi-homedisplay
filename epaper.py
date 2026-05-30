@@ -32,6 +32,7 @@ import buses
 import config
 import electricity
 import ruuvi_reader
+import weather
 
 logger = logging.getLogger(__name__)
 
@@ -115,20 +116,140 @@ def _fit(text: str, size: int, max_width: int, bold: bool = False) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Hand-drawn icons
+#
+# Real emoji / dingbat glyphs render inconsistently (often as empty "tofu"
+# boxes) across the fonts available on a dev Mac vs. the Raspberry Pi that
+# drives the panel. Drawing the icons ourselves with simple primitives keeps
+# them crisp and identical on every 1-bit display.
+# ---------------------------------------------------------------------------
+
+def _draw_sun(draw, cx, cy, r, fill=BLACK):
+    import math
+
+    # Rays.
+    for k in range(8):
+        a = k * math.pi / 4
+        x1 = cx + math.cos(a) * (r + 3)
+        y1 = cy + math.sin(a) * (r + 3)
+        x2 = cx + math.cos(a) * (r + 7)
+        y2 = cy + math.sin(a) * (r + 7)
+        draw.line([(x1, y1), (x2, y2)], fill=fill, width=2)
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=fill, width=2)
+
+
+def _draw_cloud(draw, cx, cy, s, fill=BLACK, filled=False):
+    """A simple cloud centred roughly on (cx, cy); ``s`` ≈ half-width."""
+    body = WHITE if not filled else fill
+    # Three overlapping lobes + a base, outlined.
+    draw.ellipse([cx - s, cy - s * 0.2, cx - s * 0.2, cy + s * 0.6],
+                 outline=fill, width=2, fill=body)
+    draw.ellipse([cx - s * 0.5, cy - s * 0.8, cx + s * 0.5, cy + s * 0.4],
+                 outline=fill, width=2, fill=body)
+    draw.ellipse([cx + s * 0.1, cy - s * 0.3, cx + s, cy + s * 0.6],
+                 outline=fill, width=2, fill=body)
+    draw.rectangle([cx - s * 0.7, cy + s * 0.1, cx + s * 0.7, cy + s * 0.55],
+                   fill=body)
+
+
+def _draw_weather_icon(draw, kind, x, y, size):
+    """Draw a weather icon of category ``kind`` in a ``size`` px box at (x, y)."""
+    cx = x + size / 2
+    cy = y + size / 2
+    r = size * 0.22
+
+    if kind == "sun":
+        _draw_sun(draw, cx, cy, r)
+        return
+
+    if kind == "partly":
+        _draw_sun(draw, cx - size * 0.18, cy - size * 0.18, r * 0.75)
+        _draw_cloud(draw, cx + size * 0.08, cy + size * 0.12, size * 0.28)
+        return
+
+    # Everything else is cloud-based; draw the cloud then add precipitation.
+    _draw_cloud(draw, cx, cy - size * 0.12, size * 0.30)
+    base_y = cy + size * 0.30
+
+    if kind == "rain" or kind == "drizzle":
+        n = 3 if kind == "rain" else 2
+        for k in range(n):
+            dx = cx - size * 0.22 + k * size * 0.22
+            draw.line([(dx, base_y), (dx - size * 0.06, base_y + size * 0.18)],
+                      fill=BLACK, width=2)
+    elif kind == "snow":
+        for k in range(3):
+            dx = cx - size * 0.22 + k * size * 0.22
+            _text(draw, (dx, base_y + size * 0.04), "*", int(size * 0.32), bold=True)
+    elif kind == "thunder":
+        draw.line([(cx, base_y - size * 0.02), (cx - size * 0.12, base_y + size * 0.16),
+                   (cx + size * 0.04, base_y + size * 0.14),
+                   (cx - size * 0.06, base_y + size * 0.30)], fill=BLACK, width=2)
+    elif kind == "fog":
+        for k in range(3):
+            fy = base_y - size * 0.02 + k * size * 0.12
+            draw.line([(cx - size * 0.28, fy), (cx + size * 0.28, fy)],
+                      fill=GREY, width=2)
+
+
+def _draw_bus_icon(draw, x, y, size, fill=BLACK):
+    """A small bus pictogram for the departures heading."""
+    w = size
+    h = size * 0.74
+    top = y + (size - h) / 2
+    draw.rounded_rectangle([x, top, x + w, top + h], radius=size * 0.14,
+                           outline=fill, width=2)
+    # Windscreen / window band.
+    draw.line([(x, top + h * 0.42), (x + w, top + h * 0.42)], fill=fill, width=2)
+    # Wheels.
+    wr = size * 0.10
+    draw.ellipse([x + w * 0.18 - wr, top + h - wr, x + w * 0.18 + wr, top + h + wr],
+                 fill=fill)
+    draw.ellipse([x + w * 0.82 - wr, top + h - wr, x + w * 0.82 + wr, top + h + wr],
+                 fill=fill)
+
+
+def _draw_bolt_icon(draw, x, y, size, fill=BLACK):
+    """A lightning bolt for the electricity heading."""
+    draw.line([(x + size * 0.62, y), (x + size * 0.18, y + size * 0.55),
+               (x + size * 0.5, y + size * 0.55), (x + size * 0.32, y + size),
+               (x + size * 0.85, y + size * 0.38),
+               (x + size * 0.5, y + size * 0.38)], fill=fill, width=2, joint="curve")
+
+
+def _draw_thermo_icon(draw, x, y, size, fill=BLACK):
+    """A thermometer for the sensors heading."""
+    cw = size * 0.34
+    cx = x + size / 2
+    bulb_r = size * 0.22
+    draw.rounded_rectangle([cx - cw / 2, y, cx + cw / 2, y + size * 0.66],
+                           radius=cw / 2, outline=fill, width=2)
+    draw.ellipse([cx - bulb_r, y + size * 0.55, cx + bulb_r, y + size * 0.55 + 2 * bulb_r],
+                 fill=fill)
+    draw.line([(cx, y + size * 0.2), (cx, y + size * 0.6)], fill=fill, width=2)
+
+
+# ---------------------------------------------------------------------------
 # Section renderers
 # ---------------------------------------------------------------------------
+
+# Finnish weekday abbreviations (Mon..Sun); strftime("%a") would give English.
+_FI_WEEKDAYS = ["Ma", "Ti", "Ke", "To", "Pe", "La", "Su"]
+
+
+def _fi_date(now) -> str:
+    """Finnish short date, e.g. 'La 30.5.2026'."""
+    wd = _FI_WEEKDAYS[now.weekday()]
+    return f"{wd} {now.day}.{now.month}.{now.year}"
+
 
 def _draw_header(draw, w: int) -> int:
     now = datetime.now(tz=_HELSINKI)
     clock = now.strftime("%H:%M")
-    date = now.strftime("%a %-d.%-m.%Y") if hasattr(now, "strftime") else ""
-    try:
-        date = now.strftime("%a %-d.%-m.%Y")
-    except ValueError:  # Windows has no %-d
-        date = now.strftime("%a %d.%m.%Y")
+    date = _fi_date(now)
 
-    _text(draw, (16, 8), clock, 52, bold=True)
-    _text(draw, (190, 30), date, 22, fill=GREY)
+    _text(draw, (16, 6), clock, 46, bold=True)
+    _text(draw, (172, 24), date, 20, fill=GREY)
 
     # Current electricity price, right-aligned, as an at-a-glance number.
     prices = electricity.get_prices()
@@ -136,54 +257,126 @@ def _draw_header(draw, w: int) -> int:
     if current:
         price = current["price_with_tax"]
         accent = RED if (config.EPAPER_COLOR and price >= 20) else BLACK
-        _text(draw, (w - 16, 8), f"{price:.1f}", 40, bold=True, fill=accent, anchor="ra")
-        _text(draw, (w - 16, 52), "c/kWh now", 18, fill=GREY, anchor="ra")
+        _text(draw, (w - 16, 4), f"{price:.1f}", 36, bold=True, fill=accent, anchor="ra")
+        _text(draw, (w - 16, 44), "c/kWh nyt", 16, fill=GREY, anchor="ra")
 
     if config.DEMO_MODE:
-        _text(draw, (w - 16, 74), "DEMO", 14, fill=GREY, anchor="ra")
+        _text(draw, (380, 44), "DEMO", 14, fill=GREY)
 
-    draw.line([(0, 72), (w, 72)], fill=BLACK, width=2)
-    return 72
+    # Sensor strip across the full width, just under the clock row.
+    strip_top = 62
+    draw.line([(0, strip_top), (w, strip_top)], fill=GREY, width=1)
+    _draw_sensor_strip(draw, 14, strip_top + 4, w - 28, 46)
+
+    header_bottom = strip_top + 4 + 46 + 6
+    draw.line([(0, header_bottom), (w, header_bottom)], fill=BLACK, width=2)
+    return header_bottom
 
 
-def _draw_sensors(draw, x: int, y: int, w: int, h: int) -> None:
-    _text(draw, (x, y), "SENSORS", 18, bold=True, fill=GREY)
-    data = ruuvi_reader.get_latest_data()
-
-    row_y = y + 30
+def _draw_sensor_strip(draw, x: int, y: int, w: int, h: int) -> None:
+    """Compact horizontal row of Ruuvi sensor readings for the top bar."""
     keys = list(config.RUUVI_TAGS.keys())
     if not keys:
         return
-    row_h = min(78, (h - 30) // len(keys))
+    data = ruuvi_reader.get_latest_data()
 
-    for key in keys:
+    col_gap = 14
+    col_w = (w - (len(keys) - 1) * col_gap) // len(keys)
+
+    for i, key in enumerate(keys):
+        cx = x + i * (col_w + col_gap)
         d = data.get(key, {})
         name = d.get("name", key)
         temp = d.get("temperature")
         hum = d.get("humidity")
 
-        _text(draw, (x, row_y), _fit(name, 22, w - 110, bold=True), 22, bold=True)
+        # Vertical divider between cells.
+        if i > 0:
+            draw.line([(cx - col_gap // 2, y), (cx - col_gap // 2, y + h)],
+                      fill=GREY, width=1)
+
+        _text(draw, (cx, y), _fit(name, 16, col_w - 70, bold=True), 16, bold=True)
+        sub = f"{hum:.0f}% RH" if hum is not None else ""
+        if sub:
+            _text(draw, (cx, y + 22), sub, 14, fill=GREY)
+
         if temp is not None:
-            _text(draw, (x + w, row_y - 4), f"{temp:.1f}°", 36, bold=True, anchor="ra")
+            _text(draw, (cx + col_w, y + 2), f"{temp:.1f}°", 30, bold=True, anchor="ra")
         else:
-            _text(draw, (x + w, row_y - 4), "--", 36, bold=True, fill=GREY, anchor="ra")
+            _text(draw, (cx + col_w, y + 2), "--", 30, bold=True, fill=GREY, anchor="ra")
 
-        extra = []
-        if hum is not None:
-            extra.append(f"{hum:.0f}% RH")
-        bat = d.get("battery")
-        if bat is not None:
-            extra.append(f"{bat:.2f}V")
-        if extra:
-            _text(draw, (x, row_y + 30), "   ".join(extra), 15, fill=GREY)
 
-        row_y += row_h
-        if row_y > y + h:
-            break
+def _draw_weather(draw, x: int, y: int, w: int, h: int) -> None:
+    wx = weather.get_weather()
+    _draw_thermo_icon(draw, x, y - 1, 18)
+    _text(draw, (x + 24, y), f"SÄÄ  {wx.get('location', '')}".upper(), 18,
+          bold=True, fill=GREY)
+
+    if wx.get("error"):
+        _text(draw, (x, y + 30), wx["error"], 16, fill=GREY)
+        return
+
+    cur = wx.get("current") or {}
+    temp = cur.get("temperature")
+    cy = y + 30
+    if temp is not None:
+        # Current-conditions icon to the right of the panel heading row.
+        _draw_weather_icon(draw, cur.get("icon", "cloud"), x + w - 46, y + 24, 44)
+        _text(draw, (x, cy - 6), f"{temp:.0f}°", 48, bold=True)
+        tx = x + _text_width(f"{temp:.0f}°", 48, bold=True) + 14
+        _text(draw, (tx, cy), _fit(cur.get("text", ""), 20, x + w - tx - 50, bold=True),
+              20, bold=True)
+        extras = []
+        if cur.get("humidity") is not None:
+            extras.append(f"{cur['humidity']:.0f}% RH")
+        if cur.get("wind") is not None:
+            extras.append(f"{cur['wind']:.0f} m/s")
+        if extras:
+            _text(draw, (tx, cy + 26), "   ".join(extras), 15, fill=GREY)
+
+    # Hourly forecast for the next 8 hours, laid out in two columns of four so
+    # they all fit in the left band.
+    hourly = wx.get("hourly") or []
+    # Skip the current hour (already covered by "current" above) when possible.
+    upcoming = hourly[1:] if len(hourly) > 1 else hourly
+    upcoming = upcoming[:8]
+
+    grid_top = y + 90
+    row_h = 22
+    per_col = 4
+    col_gap = 18
+    col_w = (w - col_gap) // 2
+
+    for i, hr in enumerate(upcoming):
+        col = i // per_col
+        row = i % per_col
+        cx = x + col * (col_w + col_gap)
+        ry = grid_top + row * row_h
+        if ry > y + h:
+            continue
+
+        hh = hr.get("hour")
+        text = hr.get("text", "")
+        temp = hr.get("temperature")
+        pop = hr.get("precip_prob")
+        icon = hr.get("icon", "cloud")
+
+        _text(draw, (cx, ry), f"{hh:02d}" if hh is not None else "--", 15, bold=True)
+        # Small per-hour weather icon next to the hour.
+        _draw_weather_icon(draw, icon, cx + 26, ry, 18)
+        # Rain probability sits just left of the temperature; only show it when
+        # there's a meaningful chance so the row stays uncluttered.
+        rain_txt = f"{pop:.0f}%" if isinstance(pop, (int, float)) and pop >= 10 else ""
+        if rain_txt:
+            _text(draw, (cx + col_w - 42, ry + 1), rain_txt, 13, fill=GREY, anchor="ra")
+        _text(draw, (cx + 50, ry + 1), _fit(text, 13, col_w - 50 - 86), 13, fill=BLACK)
+        t = f"{temp:.0f}°" if temp is not None else "--"
+        _text(draw, (cx + col_w, ry), t, 15, bold=True, anchor="ra")
 
 
 def _draw_electricity(draw, x: int, y: int, w: int, h: int) -> None:
-    _text(draw, (x, y), "ELECTRICITY  c/kWh", 18, bold=True, fill=GREY)
+    _draw_bolt_icon(draw, x, y - 1, 18)
+    _text(draw, (x + 24, y), "SÄHKÖ  c/kWh", 18, bold=True, fill=GREY)
     prices = electricity.get_prices()
     hours = prices.get("hours") or []
 
@@ -192,7 +385,7 @@ def _draw_electricity(draw, x: int, y: int, w: int, h: int) -> None:
     chart_h = chart_bottom - chart_top
 
     if not hours:
-        _text(draw, (x, chart_top + 10), "No price data", 18, fill=GREY)
+        _text(draw, (x, chart_top + 10), "Ei hintatietoja", 18, fill=GREY)
         return
 
     values = [hh["price_with_tax"] for hh in hours]
@@ -251,7 +444,8 @@ def _draw_electricity(draw, x: int, y: int, w: int, h: int) -> None:
 
 
 def _draw_buses(draw, x: int, y: int, w: int, h: int) -> None:
-    _text(draw, (x, y), "NEXT DEPARTURES", 18, bold=True, fill=GREY)
+    _draw_bus_icon(draw, x, y - 1, 20)
+    _text(draw, (x + 28, y), "SEURAAVAT LÄHDÖT", 18, bold=True, fill=GREY)
     stops = buses.get_schedules()
 
     col_gap = 24
@@ -262,7 +456,7 @@ def _draw_buses(draw, x: int, y: int, w: int, h: int) -> None:
         cx = x + ci * (col_w + col_gap)
         cy = y + 30
 
-        name = stop.get("name", "Stop")
+        name = stop.get("name", "Pysäkki")
         code = stop.get("code")
         title = f"{name} ({code})" if code else name
         _text(draw, (cx, cy), _fit(title, 17, col_w, bold=True), 17, bold=True)
@@ -274,7 +468,7 @@ def _draw_buses(draw, x: int, y: int, w: int, h: int) -> None:
 
         deps = stop.get("departures") or []
         if not deps:
-            _text(draw, (cx, cy), "No departures", 15, fill=GREY)
+            _text(draw, (cx, cy), "Ei lähtöjä", 15, fill=GREY)
             continue
 
         for dep in deps[:rows]:
@@ -289,7 +483,7 @@ def _draw_buses(draw, x: int, y: int, w: int, h: int) -> None:
             _text(draw, (cx + badge_w / 2, cy + 11), route, 16, bold=True,
                   fill=WHITE, anchor="mm")
 
-            min_txt = f"{mins}'" if isinstance(mins, int) and mins >= 0 else "now"
+            min_txt = f"{mins}'" if isinstance(mins, int) and mins >= 0 else "nyt"
             _text(draw, (cx + col_w, cy + 2), f"{time_s}  {min_txt}", 16,
                   bold=True, anchor="ra")
 
@@ -316,12 +510,13 @@ def render() -> Image.Image:
     header_bottom = _draw_header(draw, w)
 
     margin = 14
-    body_top = header_bottom + 12
+    body_top = header_bottom + 10
 
-    # Top band: sensors (left) | electricity (right).
-    band_h = 196
-    mid_x = int(w * 0.42)
-    _draw_sensors(draw, margin, body_top, mid_x - margin - 12, band_h)
+    # Top band: weather (left) | electricity (right). Sensors now live in the
+    # top bar, so the left column shows the local forecast instead.
+    band_h = 168
+    mid_x = int(w * 0.44)
+    _draw_weather(draw, margin, body_top, mid_x - margin - 12, band_h)
     draw.line([(mid_x, body_top), (mid_x, body_top + band_h)], fill=GREY, width=1)
     _draw_electricity(draw, mid_x + 16, body_top, w - mid_x - 16 - margin, band_h)
 
