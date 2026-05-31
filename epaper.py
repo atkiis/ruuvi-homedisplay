@@ -104,6 +104,8 @@ def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 # ---------------------------------------------------------------------------
 
 def _text(draw, xy, text, size, *, bold=False, fill=BLACK, anchor="la"):
+    if getattr(config, "EPAPER_FORCE_BOLD", False):
+        bold = True
     draw.text(xy, text, font=_font(size, bold), fill=fill, anchor=anchor)
 
 
@@ -520,7 +522,7 @@ def _draw_buses(draw, x: int, y: int, w: int, h: int) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-_NIGHT_START = 23  # inclusive (hour in Helsinki time)
+_NIGHT_START = 22  # inclusive (hour in Helsinki time)
 _NIGHT_END = 6     # exclusive (resume at this hour)
 
 
@@ -531,7 +533,18 @@ def is_night_mode() -> bool:
 
 
 def render() -> Image.Image:
-    """Build and return the full dashboard image as an RGB ``PIL.Image``."""
+    """Build and return the dashboard image in the orientation set by config.
+
+    Delegates to ``render_portrait()`` when ``config.EPAPER_ORIENTATION`` is
+    ``"portrait"``, otherwise renders the standard landscape layout.
+    """
+    if getattr(config, "EPAPER_ORIENTATION", "landscape") == "portrait":
+        return render_portrait()
+    return _render_landscape()
+
+
+def _render_landscape() -> Image.Image:
+    """Build and return the 800×480 landscape dashboard as an RGB PIL.Image."""
     w = config.EPAPER_WIDTH
     h = config.EPAPER_HEIGHT
 
@@ -583,6 +596,81 @@ def render_bmp(mono: bool = True) -> bytes:
         # Floyd-Steinberg dithering preserves the tonal hierarchy of grey labels
         # and icons (they dither to a lighter pattern instead of collapsing to
         # solid black) while keeping bold text crisp at 800×480 resolution.
+        img = img.convert("1")
+    buf = io.BytesIO()
+    img.save(buf, format="BMP")
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Portrait / vertical layout  (480 × 800 – same panel mounted on its side)
+# ---------------------------------------------------------------------------
+# Sections are stacked top-to-bottom:
+#   header (clock + sensor strip)  ~118 px
+#   weather                         220 px
+#   ── divider ──
+#   electricity chart               155 px
+#   ── divider ──
+#   bus departures                  remainder
+# ---------------------------------------------------------------------------
+
+_PORTRAIT_W = 480
+_PORTRAIT_H = 800
+
+
+def render_portrait() -> Image.Image:
+    """Build and return the 480×800 portrait dashboard as an RGB PIL.Image."""
+    w = _PORTRAIT_W
+    h = _PORTRAIT_H
+
+    if is_night_mode():
+        img = Image.new("RGB", (w, h), WHITE)
+        draw = ImageDraw.Draw(img)
+        now = datetime.now(tz=_HELSINKI)
+        _text(draw, (w // 2, h // 2 - 24), now.strftime("%H:%M"), 80, bold=True, anchor="mm")
+        _text(draw, (w // 2, h // 2 + 44), _fi_date(now), 22, fill=GREY, anchor="mm")
+        return img
+
+    img = Image.new("RGB", (w, h), WHITE)
+    draw = ImageDraw.Draw(img)
+
+    # The existing header renderer works at any width – it anchors clock left
+    # and price right, so it adapts cleanly to 480 px.
+    header_bottom = _draw_header(draw, w)
+
+    margin = 14
+    body_top = header_bottom + 10
+    remaining = h - body_top - margin
+
+    # Fixed heights leave the rest for buses, which benefits most from space.
+    weather_h = 220
+    elec_h = 155
+    divider_space = 20  # 10 px gap either side of each bold divider line
+    bus_h = remaining - weather_h - elec_h - divider_space * 2
+
+    _draw_weather(draw, margin, body_top, w - 2 * margin, weather_h)
+
+    elec_top = body_top + weather_h + divider_space
+    draw.line([(0, elec_top - 4), (w, elec_top - 4)], fill=BLACK, width=2)
+    _draw_electricity(draw, margin, elec_top, w - 2 * margin, elec_h)
+
+    bus_top = elec_top + elec_h + divider_space
+    draw.line([(0, bus_top - 4), (w, bus_top - 4)], fill=BLACK, width=2)
+    _draw_buses(draw, margin, bus_top, w - 2 * margin, bus_h)
+
+    return img
+
+
+def render_portrait_png() -> bytes:
+    buf = io.BytesIO()
+    render_portrait().save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_portrait_bmp(mono: bool = True) -> bytes:
+    """1-bit BMP version of the portrait layout."""
+    img = render_portrait()
+    if mono:
         img = img.convert("1")
     buf = io.BytesIO()
     img.save(buf, format="BMP")

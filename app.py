@@ -82,7 +82,7 @@ def epaper_bmp():
 
 @app.route("/epaper")
 def epaper_preview():
-    """Simple HTML wrapper to preview the e-paper image in a desktop browser."""
+    """Simple HTML wrapper to preview the landscape e-paper image in a desktop browser."""
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<title>E-paper preview</title>"
