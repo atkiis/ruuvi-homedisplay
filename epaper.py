@@ -237,6 +237,24 @@ def _draw_thermo_icon(draw, x, y, size, fill=BLACK):
     draw.line([(cx, y + size * 0.2), (cx, y + size * 0.6)], fill=fill, width=2)
 
 
+def _draw_steam(draw, cx, cy_bottom, width, height, fill=BLACK):
+    """Three wavy steam lines rising upward, decorating the sauna löyly count."""
+    import math
+    n = 3
+    spacing = width / (n + 1)
+    for i in range(n):
+        sx = cx - width / 2 + spacing * (i + 1)
+        pts = []
+        steps = 18
+        for j in range(steps + 1):
+            frac = j / steps
+            y = cy_bottom - frac * height
+            x = sx + (width / (n * 2.5)) * math.sin(frac * 3 * math.pi)
+            pts.append((x, y))
+        for j in range(len(pts) - 1):
+            draw.line([pts[j], pts[j + 1]], fill=fill, width=3)
+
+
 # ---------------------------------------------------------------------------
 # Section renderers
 # ---------------------------------------------------------------------------
@@ -281,6 +299,26 @@ def _draw_header(draw, w: int) -> int:
     return header_bottom
 
 
+def _data_age_label(updated_at: str | None) -> str | None:
+    """Return a short staleness label (e.g. '45 min') when data is older than
+    RUUVI_STALE_MINUTES, or None when data is fresh / never received."""
+    if not updated_at:
+        return "ei yht."  # no contact at all
+    try:
+        from datetime import timezone as _tz
+        ts = datetime.fromisoformat(updated_at)
+        age_s = (datetime.now(_tz.utc) - ts).total_seconds()
+        threshold = getattr(config, "RUUVI_STALE_MINUTES", 10) * 60
+        if age_s < threshold:
+            return None  # fresh enough
+        age_min = int(age_s // 60)
+        if age_min < 60:
+            return f"{age_min} min"
+        return f"{age_min // 60}h {age_min % 60:02d}m"
+    except Exception:
+        return None
+
+
 def _draw_sensor_strip(draw, x: int, y: int, w: int, h: int) -> None:
     """Compact horizontal row of Ruuvi sensor readings for the top bar."""
     keys = list(config.RUUVI_TAGS.keys())
@@ -297,6 +335,7 @@ def _draw_sensor_strip(draw, x: int, y: int, w: int, h: int) -> None:
         name = d.get("name", key)
         temp = d.get("temperature")
         hum = d.get("humidity")
+        age_label = _data_age_label(d.get("updated_at"))
 
         # Vertical divider between cells.
         if i > 0:
@@ -304,12 +343,16 @@ def _draw_sensor_strip(draw, x: int, y: int, w: int, h: int) -> None:
                       fill=GREY, width=1)
 
         _text(draw, (cx, y), _fit(name, 16, col_w - 70, bold=True), 16, bold=True)
-        sub = f"{hum:.0f}% RH" if hum is not None else ""
-        if sub:
-            _text(draw, (cx, y + 22), sub, 14, fill=GREY)
+        if age_label:
+            # Show staleness instead of humidity when data is old.
+            _text(draw, (cx, y + 22), age_label, 14, fill=GREY)
+        elif hum is not None:
+            _text(draw, (cx, y + 22), f"{hum:.0f}% RH", 14, fill=GREY)
 
         if temp is not None:
-            _text(draw, (cx + col_w, y + 2), f"{temp:.1f}°", 30, bold=True, anchor="ra")
+            fill = GREY if age_label else BLACK
+            _text(draw, (cx + col_w, y + 2), f"{temp:.1f}°", 30, bold=True,
+                  fill=fill, anchor="ra")
         else:
             _text(draw, (cx + col_w, y + 2), "--", 30, bold=True, fill=GREY, anchor="ra")
 
@@ -522,6 +565,125 @@ def _draw_buses(draw, x: int, y: int, w: int, h: int) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Sauna view helpers
+# ---------------------------------------------------------------------------
+
+def _session_duration(session_start: str | None) -> str:
+    """Return a Finnish session duration string, e.g. 'Saunattu: 1h 23min'."""
+    if not session_start:
+        return ""
+    try:
+        from datetime import timezone as _tz
+        ts = datetime.fromisoformat(session_start)
+        secs = int((datetime.now(_tz.utc) - ts).total_seconds())
+        h, rem = divmod(secs, 3600)
+        m = rem // 60
+        if h:
+            return f"Saunattu: {h}h {m:02d}min"
+        return f"Saunattu: {m} min"
+    except Exception:
+        return ""
+
+
+def _draw_sauna_header(draw, w: int) -> int:
+    """Compact header for sauna view: clock left, date right."""
+    now = datetime.now(tz=_HELSINKI)
+    _text(draw, (16, 8), now.strftime("%H:%M"), 40, bold=True)
+    _text(draw, (w - 16, 8), _fi_date(now), 20, fill=GREY, anchor="ra")
+    header_bottom = 56
+    draw.line([(0, header_bottom), (w, header_bottom)], fill=BLACK, width=2)
+    return header_bottom
+
+
+def _render_sauna_landscape(sauna: dict) -> Image.Image:
+    """800×480 sauna view: big temperature left, löyly count right."""
+    w = config.EPAPER_WIDTH
+    h = config.EPAPER_HEIGHT
+    img = Image.new("RGB", (w, h), WHITE)
+    draw = ImageDraw.Draw(img)
+
+    header_bottom = _draw_sauna_header(draw, w)
+    body_top = header_bottom + 10
+
+    # ── Left column: temperature & session info ──────────────────────────────
+    left_cx = int(w * 0.28)      # horizontal centre of left column
+    divider_x = int(w * 0.54)   # vertical divider position
+
+    _text(draw, (16, body_top), "SAUNA", 24, bold=True)
+
+    temp = sauna.get("temperature")
+    hum = sauna.get("humidity")
+    temp_str = f"{temp:.0f}°" if temp is not None else "--"
+    _text(draw, (left_cx, body_top + 150), temp_str, 120, bold=True, anchor="mm")
+
+    if hum is not None:
+        _text(draw, (left_cx, body_top + 240), f"{hum:.0f}% RH", 34, bold=True, anchor="mm")
+
+    dur = _session_duration(sauna.get("session_start"))
+    if dur:
+        _text(draw, (left_cx, body_top + 300), dur, 20, fill=GREY, anchor="mm")
+
+    # ── Vertical divider ─────────────────────────────────────────────────────
+    draw.line([(divider_x, body_top), (divider_x, h - 10)], fill=GREY, width=1)
+
+    # ── Right column: löyly count ────────────────────────────────────────────
+    right_cx = divider_x + (w - divider_x) // 2
+    count = sauna.get("loyly_count", 0)
+
+    _text(draw, (right_cx, body_top + 20), "LÖYLYÄ", 28, bold=True, anchor="mm")
+    # Steam icon sitting above the count number.
+    _draw_steam(draw, right_cx, body_top + 130, 110, 80)
+    _text(draw, (right_cx, body_top + 280), str(count), 110, bold=True, anchor="mm")
+    _text(draw, (right_cx, body_top + 355), "kertaa", 20, fill=GREY, anchor="mm")
+
+    if config.EPAPER_ROTATE:
+        img = img.rotate(config.EPAPER_ROTATE, expand=True)
+    return img
+
+
+def _render_sauna_portrait(sauna: dict) -> Image.Image:
+    """480×800 portrait sauna view: temperature top half, löyly count bottom half."""
+    w = _PORTRAIT_W
+    h = _PORTRAIT_H
+    img = Image.new("RGB", (w, h), WHITE)
+    draw = ImageDraw.Draw(img)
+
+    header_bottom = _draw_sauna_header(draw, w)
+    body_top = header_bottom + 10
+    cx = w // 2
+
+    # ── Top section: temperature & session info ───────────────────────────────
+    _text(draw, (cx, body_top + 10), "SAUNA", 24, bold=True, anchor="mm")
+
+    temp = sauna.get("temperature")
+    hum = sauna.get("humidity")
+    temp_str = f"{temp:.0f}°" if temp is not None else "--"
+    _text(draw, (cx, body_top + 160), temp_str, 130, bold=True, anchor="mm")
+
+    if hum is not None:
+        _text(draw, (cx, body_top + 262), f"{hum:.0f}% RH", 34, bold=True, anchor="mm")
+
+    dur = _session_duration(sauna.get("session_start"))
+    if dur:
+        _text(draw, (cx, body_top + 316), dur, 20, fill=GREY, anchor="mm")
+
+    # ── Divider ───────────────────────────────────────────────────────────────
+    div_y = body_top + 348
+    draw.line([(0, div_y), (w, div_y)], fill=BLACK, width=2)
+
+    # ── Bottom section: löyly count ──────────────────────────────────────────
+    count = sauna.get("loyly_count", 0)
+    sec_top = div_y + 14
+
+    _text(draw, (cx, sec_top + 20), "LÖYLYÄ", 28, bold=True, anchor="mm")
+    _draw_steam(draw, cx, sec_top + 120, 120, 80)
+    _text(draw, (cx, sec_top + 270), str(count), 120, bold=True, anchor="mm")
+    _text(draw, (cx, sec_top + 345), "kertaa", 22, fill=GREY, anchor="mm")
+
+    return img
+
 _NIGHT_START = 22  # inclusive (hour in Helsinki time)
 _NIGHT_END = 6     # exclusive (resume at this hour)
 
@@ -545,6 +707,11 @@ def render() -> Image.Image:
 
 def _render_landscape() -> Image.Image:
     """Build and return the 800×480 landscape dashboard as an RGB PIL.Image."""
+    # Sauna mode takes priority over everything including night mode.
+    sauna = ruuvi_reader.get_sauna_state()
+    if sauna:
+        return _render_sauna_landscape(sauna)
+
     w = config.EPAPER_WIDTH
     h = config.EPAPER_HEIGHT
 
@@ -620,6 +787,11 @@ _PORTRAIT_H = 800
 
 def render_portrait() -> Image.Image:
     """Build and return the 480×800 portrait dashboard as an RGB PIL.Image."""
+    # Sauna mode takes priority over everything including night mode.
+    sauna = ruuvi_reader.get_sauna_state()
+    if sauna:
+        return _render_sauna_portrait(sauna)
+
     w = _PORTRAIT_W
     h = _PORTRAIT_H
 

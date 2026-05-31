@@ -35,6 +35,11 @@ RUUVI_TAGS = {
 # How often the background Ruuvi scan should attempt to read fresh data (seconds).
 RUUVI_SCAN_INTERVAL = 60
 
+# Data older than this many minutes is shown with a staleness label (e.g. "45 min")
+# on the e-paper sensor strip instead of the humidity reading, and the temperature
+# is greyed out.  Useful for tags that are occasionally out of BLE range.
+RUUVI_STALE_MINUTES = 10
+
 # ── Bus stops ───────────────────────────────────────────────────────────────
 # Use the Digitransit stop finder to get your stop IDs:
 #   https://reittiopas.hsl.fi  (HSL area)
@@ -94,3 +99,18 @@ EPAPER_ROTATE = 0         # Rotate the rendered image (0/90/180/270) if mounted 
 # Set True only for the 6-colour reTerminal E1002; adds red highlights for
 # expensive electricity hours. Leave False for the monochrome E1001.
 EPAPER_COLOR = False
+# Layout orientation: "landscape" (800x480, panel horizontal) or
+# "portrait" (480x800, panel mounted vertically).  All /epaper endpoints
+# will serve the chosen layout automatically.
+EPAPER_ORIENTATION = "landscape"
+# Force all text to bold weight.  Recommended for most monochrome e-paper
+# panels where thin strokes are too faint to read at normal viewing distance.
+EPAPER_FORCE_BOLD = True
+
+# ── Sauna view ───────────────────────────────────────────────────────────────
+# When the sauna tag temperature rises above SAUNA_TEMP_THRESHOLD the e-paper
+# automatically switches to a dedicated sauna view that shows the temperature,
+# humidity, and a running count of löyly (steam throws) detected from RH spikes.
+SAUNA_TAG_KEY = "sauna"    # Key in RUUVI_TAGS that is the sauna sensor.
+SAUNA_TEMP_THRESHOLD = 75  # °C – above this the sauna view is activated.
+LOYLY_RH_SPIKE = 5.0       # Minimum RH % increase to count as one löyly.
