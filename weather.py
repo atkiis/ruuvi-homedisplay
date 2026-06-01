@@ -10,6 +10,7 @@ the upstream service.
 """
 
 import logging
+import threading
 import time
 from zoneinfo import ZoneInfo
 
@@ -23,7 +24,10 @@ _HELSINKI = ZoneInfo("Europe/Helsinki")
 
 _cache: dict = {}
 _cache_ts: float = 0.0
+_lock = threading.Lock()
+_refresh_lock = threading.Lock()
 _CACHE_TTL = 900  # 15 minutes
+_REFRESH_INTERVAL = 900  # background refresh cadence (seconds)
 
 # WMO weather interpretation codes → short, e-ink friendly Finnish text.
 _WMO = {
@@ -114,40 +118,62 @@ def get_weather() -> dict:
         current  – {temperature, humidity, wind, code, text} or None
         hourly   – list of {time, hour, code, text, temperature, precip_prob} for the next hours
         error    – present only if the fetch failed and no cache exists
+
+    Always returns cached data instantly. On a cold cache it performs one
+    synchronous fetch; thereafter the background thread keeps it fresh.
     """
+    with _lock:
+        cache = _cache
+    if not cache:
+        _refresh()  # cold-start fallback
+        with _lock:
+            cache = _cache
+    if not cache:
+        return {"location": config.WEATHER_NAME, "current": None, "hourly": [],
+                "error": "Säätiedot eivät saatavilla"}
+    return cache
+
+
+def start() -> None:
+    """Start a daemon thread that keeps the weather cache warm in the background."""
+    def _loop() -> None:
+        while True:
+            _refresh()
+            time.sleep(_REFRESH_INTERVAL)
+
+    threading.Thread(target=_loop, daemon=True, name="weather-refresh").start()
+
+
+def _refresh() -> None:
+    """Fetch fresh weather and atomically replace the cache. Network runs outside
+    the data lock; ``_refresh_lock`` serialises concurrent refreshes."""
     global _cache, _cache_ts
-
-    now = time.monotonic()
-    if _cache and (now - _cache_ts) < _CACHE_TTL:
-        return _cache
-
-    params = {
-        "latitude": config.WEATHER_LAT,
-        "longitude": config.WEATHER_LON,
-        "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
-        "hourly": "weather_code,temperature_2m,precipitation_probability",
-        "timezone": "Europe/Helsinki",
-        "forecast_days": 2,
-    }
-
-    try:
-        resp = requests.get(config.WEATHER_API_URL, params=params, timeout=10)
-        resp.raise_for_status()
-        _cache = _parse(resp.json())
-        _cache_ts = now
+    with _refresh_lock:
+        with _lock:
+            if _cache and (time.monotonic() - _cache_ts) < _CACHE_TTL:
+                return
+        params = {
+            "latitude": config.WEATHER_LAT,
+            "longitude": config.WEATHER_LON,
+            "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+            "hourly": "weather_code,temperature_2m,precipitation_probability",
+            "timezone": "Europe/Helsinki",
+            "forecast_days": 2,
+        }
+        try:
+            resp = requests.get(config.WEATHER_API_URL, params=params, timeout=10)
+            resp.raise_for_status()
+            parsed = _parse(resp.json())
+        except requests.RequestException as exc:
+            logger.warning("Failed to fetch weather: %s", exc)
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Unexpected error fetching weather: %s", exc)
+            return
+        with _lock:
+            _cache = parsed
+            _cache_ts = time.monotonic()
         logger.info("Weather refreshed for %s.", config.WEATHER_NAME)
-    except requests.RequestException as exc:
-        logger.warning("Failed to fetch weather: %s", exc)
-        if not _cache:
-            return {"location": config.WEATHER_NAME, "current": None, "hourly": [],
-                    "error": "Säätiedot eivät saatavilla"}
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Unexpected error fetching weather: %s", exc)
-        if not _cache:
-            return {"location": config.WEATHER_NAME, "current": None, "hourly": [],
-                    "error": "Säätiedot eivät saatavilla"}
-
-    return _cache
 
 
 # Number of upcoming hourly forecast entries to expose (current hour + next 8).

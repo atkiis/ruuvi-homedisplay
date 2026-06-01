@@ -750,15 +750,28 @@ def _render_landscape() -> Image.Image:
     return img
 
 
+def _invert(img: Image.Image) -> Image.Image:
+    """Invert black<->white when ``config.EPAPER_INVERT`` is set.
+
+    Some 1-bit panels treat a set bit as white and others as black, so a PNG
+    that looks correct on screen can appear with inverted colours on the panel.
+    Enable EPAPER_INVERT to flip the output to match the hardware.
+    """
+    if getattr(config, "EPAPER_INVERT", False):
+        from PIL import ImageOps
+        return ImageOps.invert(img.convert("RGB"))
+    return img
+
+
 def render_png() -> bytes:
     buf = io.BytesIO()
-    render().save(buf, format="PNG")
+    _invert(render()).save(buf, format="PNG")
     return buf.getvalue()
 
 
 def render_bmp(mono: bool = True) -> bytes:
     """Return a BMP. ``mono`` produces a 1-bit image for bare e-ink sketches."""
-    img = render()
+    img = _invert(render())
     if mono:
         # Floyd-Steinberg dithering preserves the tonal hierarchy of grey labels
         # and icons (they dither to a lighter pattern instead of collapsing to
@@ -835,13 +848,13 @@ def render_portrait() -> Image.Image:
 
 def render_portrait_png() -> bytes:
     buf = io.BytesIO()
-    render_portrait().save(buf, format="PNG")
+    _invert(render_portrait()).save(buf, format="PNG")
     return buf.getvalue()
 
 
 def render_portrait_bmp(mono: bool = True) -> bytes:
     """1-bit BMP version of the portrait layout."""
-    img = render_portrait()
+    img = _invert(render_portrait())
     if mono:
         img = img.convert("1")
     buf = io.BytesIO()

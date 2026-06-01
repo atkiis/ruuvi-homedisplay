@@ -17,6 +17,7 @@ import config
 import electricity
 import epaper
 import ruuvi_reader
+import weather
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,8 +26,13 @@ logging.basicConfig(
 
 app = Flask(__name__)
 
-# Start the background Ruuvi BLE / demo thread.
+# Start the background data threads. Each keeps its in-memory cache warm so
+# request handlers (and the e-paper renderer) always serve data instantly
+# without blocking on upstream APIs.
 ruuvi_reader.start()
+electricity.start()
+weather.start()
+buses.start()
 
 
 # ---------------------------------------------------------------------------

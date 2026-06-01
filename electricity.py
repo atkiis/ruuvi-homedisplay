@@ -6,6 +6,7 @@ We cache the result for 15 minutes to avoid hammering the upstream service.
 """
 
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -20,7 +21,20 @@ _HELSINKI = ZoneInfo("Europe/Helsinki")
 
 _cache: dict = {}
 _cache_ts: float = 0.0
+_lock = threading.Lock()
+_refresh_lock = threading.Lock()
 _CACHE_TTL = 900  # 15 minutes
+_REFRESH_INTERVAL = 900  # background refresh cadence (seconds)
+
+
+def start() -> None:
+    """Start a daemon thread that keeps the price cache warm in the background."""
+    def _loop() -> None:
+        while True:
+            _refresh()
+            time.sleep(_REFRESH_INTERVAL)
+
+    threading.Thread(target=_loop, daemon=True, name="electricity-refresh").start()
 
 
 def get_prices() -> dict:
@@ -29,30 +43,46 @@ def get_prices() -> dict:
         hours   – list of 24 dicts {hour, price_no_tax, price_with_tax, is_current}
         current – the entry for the current hour (or None)
         unit    – "c/kWh"
+
+    Always returns cached data instantly. On a cold cache it performs one
+    synchronous fetch; thereafter the background thread keeps it fresh.
     """
+    with _lock:
+        cache = _cache
+    if not cache:
+        _refresh()  # cold-start fallback
+        with _lock:
+            cache = _cache
+    if not cache:
+        return {"hours": [], "current": None, "unit": "c/kWh",
+                "error": "Electricity data unavailable"}
+    return _patch_current(cache)
+
+
+def _refresh() -> None:
+    """Fetch fresh prices and atomically replace the cache. Network runs outside
+    the data lock; ``_refresh_lock`` serialises concurrent refreshes so a burst
+    of cold requests triggers only one upstream call."""
     global _cache, _cache_ts
-
-    now = time.monotonic()
-    if _cache and (now - _cache_ts) < _CACHE_TTL:
-        return _patch_current(_cache)
-
-    try:
-        resp = requests.get(config.ELECTRICITY_API_URL, timeout=10)
-        resp.raise_for_status()
-        raw = resp.json()
-        _cache = _parse(raw)
-        _cache_ts = now
-        logger.info("Electricity prices refreshed (%d entries).", len(_cache.get("hours", [])))
-    except requests.RequestException as exc:
-        logger.warning("Failed to fetch electricity prices: %s", exc)
-        if not _cache:
-            return {"hours": [], "current": None, "unit": "c/kWh", "error": "Electricity data unavailable"}
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Unexpected error fetching electricity prices: %s", exc)
-        if not _cache:
-            return {"hours": [], "current": None, "unit": "c/kWh", "error": "Electricity data unavailable"}
-
-    return _patch_current(_cache)
+    with _refresh_lock:
+        # Another thread may have refreshed while we waited for the lock.
+        with _lock:
+            if _cache and (time.monotonic() - _cache_ts) < _CACHE_TTL:
+                return
+        try:
+            resp = requests.get(config.ELECTRICITY_API_URL, timeout=10)
+            resp.raise_for_status()
+            parsed = _parse(resp.json())
+        except requests.RequestException as exc:
+            logger.warning("Failed to fetch electricity prices: %s", exc)
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Unexpected error fetching electricity prices: %s", exc)
+            return
+        with _lock:
+            _cache = parsed
+            _cache_ts = time.monotonic()
+        logger.info("Electricity prices refreshed (%d entries).", len(parsed.get("hours", [])))
 
 
 def _parse(raw: list) -> dict:

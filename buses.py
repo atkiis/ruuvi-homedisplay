@@ -8,6 +8,7 @@ Results are cached for 60 seconds so rapid page refreshes don't hammer the API.
 """
 
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -22,7 +23,10 @@ _HELSINKI = ZoneInfo("Europe/Helsinki")
 
 # Simple in-memory cache: { stop_id: (timestamp, data) }
 _cache: dict[str, tuple[float, dict]] = {}
+_lock = threading.Lock()
+_refresh_lock = threading.Lock()
 _CACHE_TTL = 60  # seconds
+_REFRESH_INTERVAL = 60  # background refresh cadence (seconds)
 
 _STOP_QUERY = """
 query StopDepartures($stopId: String!, $count: Int!) {
@@ -51,25 +55,58 @@ query StopDepartures($stopId: String!, $count: Int!) {
 """
 
 
+def start() -> None:
+    """Start a daemon thread that keeps the departure cache warm in the background."""
+    def _loop() -> None:
+        while True:
+            _refresh()
+            time.sleep(_REFRESH_INTERVAL)
+
+    threading.Thread(target=_loop, daemon=True, name="buses-refresh").start()
+
+
 def get_schedules() -> list[dict]:
-    """Return a list of stop dicts, each containing next departures."""
+    """Return a list of stop dicts, each containing next departures.
+
+    Always returns cached data instantly. On a cold cache it performs one
+    synchronous fetch; thereafter the background thread keeps it fresh.
+    """
     results = []
-    for stop_cfg in config.BUS_STOPS:
-        results.append(_get_stop(stop_cfg))
+    cold = False
+    with _lock:
+        for stop_cfg in config.BUS_STOPS:
+            cached = _cache.get(stop_cfg["id"])
+            if cached is None:
+                cold = True
+                break
+            results.append(cached[1])
+    if cold:
+        _refresh()  # cold-start fallback
+        results = []
+        with _lock:
+            for stop_cfg in config.BUS_STOPS:
+                cached = _cache.get(stop_cfg["id"])
+                if cached is not None:
+                    results.append(cached[1])
+                else:
+                    results.append({"id": stop_cfg["id"], "name": stop_cfg["name"],
+                                    "departures": [], "error": "Transit data unavailable"})
     return results
 
 
-def _get_stop(stop_cfg: dict) -> dict:
-    stop_id = stop_cfg["id"]
-    now = time.monotonic()
-
-    cached_ts, cached_data = _cache.get(stop_id, (0.0, None))
-    if cached_data and (now - cached_ts) < _CACHE_TTL:
-        return cached_data
-
-    data = _fetch_stop(stop_id, stop_cfg["name"])
-    _cache[stop_id] = (now, data)
-    return data
+def _refresh() -> None:
+    """Fetch fresh departures for every configured stop and update the cache.
+    Network runs outside the data lock; ``_refresh_lock`` serialises refreshes."""
+    with _refresh_lock:
+        for stop_cfg in config.BUS_STOPS:
+            stop_id = stop_cfg["id"]
+            with _lock:
+                cached = _cache.get(stop_id)
+            if cached and (time.monotonic() - cached[0]) < _CACHE_TTL:
+                continue
+            data = _fetch_stop(stop_id, stop_cfg["name"])
+            with _lock:
+                _cache[stop_id] = (time.monotonic(), data)
 
 
 def _fetch_stop(stop_id: str, label: str) -> dict:
