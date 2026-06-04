@@ -10,7 +10,7 @@ Or with a production WSGI server:
 
 import logging
 
-from flask import Flask, jsonify, render_template, Response
+from flask import Flask, jsonify, render_template, Response, request
 
 import buses
 import config
@@ -78,7 +78,23 @@ def api_buses():
 
 @app.route("/epaper.png")
 def epaper_png():
-    return Response(epaper.render_png(), mimetype="image/png")
+    etag = epaper.get_render_etag()
+    if request.headers.get("If-None-Match") == etag:
+        return Response(status=304)
+    data = epaper.render_png()
+    resp = Response(data, mimetype="image/png")
+    resp.set_etag(etag)
+    return resp
+
+
+@app.route("/epaper/etag")
+def epaper_etag():
+    """Lightweight endpoint returning the current image ETag as plain text.
+
+    The e-paper device polls this cheaply to decide whether a full image
+    download (and panel refresh) is actually needed.
+    """
+    return Response(epaper.get_render_etag(), mimetype="text/plain")
 
 
 @app.route("/epaper.bmp")

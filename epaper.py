@@ -21,8 +21,11 @@ Endpoints exposed by ``app.py``:
     /epaper       – HTML preview wrapper for tweaking the layout in a browser
 """
 
+import hashlib
 import io
 import logging
+import threading
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -763,10 +766,49 @@ def _invert(img: Image.Image) -> Image.Image:
     return img
 
 
-def render_png() -> bytes:
+# ---------------------------------------------------------------------------
+# Render cache – avoids re-rendering on every device poll within a refresh
+# window. The cache entry is invalidated after _RENDER_CACHE_TTL seconds so
+# that stale data is never served for more than one interval. A potential
+# double-render race is intentionally accepted over adding another lock.
+# ---------------------------------------------------------------------------
+_render_cache: dict[str, tuple[str, bytes, float]] = {}  # key → (etag, png_bytes, monotonic_ts)
+_render_cache_lock = threading.Lock()
+_RENDER_CACHE_TTL = 55  # slightly under the 60 s data refresh interval
+
+
+def _cached_render_png(key: str, render_fn) -> tuple[str, bytes]:
+    """Return *(etag, png_bytes)*, pulling from cache when still fresh."""
+    with _render_cache_lock:
+        entry = _render_cache.get(key)
+        if entry and (time.monotonic() - entry[2]) < _RENDER_CACHE_TTL:
+            return entry[0], entry[1]
+    # Render outside the lock so long renders don't block concurrent readers.
     buf = io.BytesIO()
-    _invert(render()).save(buf, format="PNG")
-    return buf.getvalue()
+    _invert(render_fn()).save(buf, format="PNG")
+    data = buf.getvalue()
+    etag = hashlib.md5(data).hexdigest()
+    with _render_cache_lock:
+        _render_cache[key] = (etag, data, time.monotonic())
+    return etag, data
+
+
+def get_render_etag() -> str:
+    """Return the ETag of the image that would be served by render_png().
+
+    Uses the render cache, so calling this is nearly free after the first
+    render. The e-paper device can poll */epaper/etag* and only fetch the
+    full image when the value changes – avoiding unnecessary panel refreshes.
+    """
+    key = "portrait" if getattr(config, "EPAPER_ORIENTATION", "landscape") == "portrait" else "main"
+    etag, _ = _cached_render_png(key, render)
+    return etag
+
+
+def render_png() -> bytes:
+    key = "portrait" if getattr(config, "EPAPER_ORIENTATION", "landscape") == "portrait" else "main"
+    _, data = _cached_render_png(key, render)
+    return data
 
 
 def render_bmp(mono: bool = True) -> bytes:
@@ -847,9 +889,8 @@ def render_portrait() -> Image.Image:
 
 
 def render_portrait_png() -> bytes:
-    buf = io.BytesIO()
-    _invert(render_portrait()).save(buf, format="PNG")
-    return buf.getvalue()
+    _, data = _cached_render_png("portrait", render_portrait)
+    return data
 
 
 def render_portrait_bmp(mono: bool = True) -> bytes:
