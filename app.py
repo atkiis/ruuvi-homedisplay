@@ -9,6 +9,8 @@ Or with a production WSGI server:
 """
 
 import logging
+import threading
+from datetime import datetime, timezone
 
 from flask import Flask, jsonify, render_template, Response, request
 
@@ -25,6 +27,14 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
+
+_device_state_lock = threading.Lock()
+_device_state = {
+    "battery_level": None,
+    "battery_voltage": None,
+    "updated_at": None,
+    "source_ip": None,
+}
 
 # Start the background data threads. Each keeps its in-memory cache warm so
 # request handlers (and the e-paper renderer) always serve data instantly
@@ -47,6 +57,7 @@ def index():
         tags=config.RUUVI_TAGS,
         bus_stops=config.BUS_STOPS,
         refresh_interval=config.REFRESH_INTERVAL,
+        ruuvi_stale_minutes=config.RUUVI_STALE_MINUTES,
         demo_mode=config.DEMO_MODE,
     )
 
@@ -71,6 +82,44 @@ def api_buses():
     return jsonify(buses.get_schedules())
 
 
+@app.route("/api/device")
+def api_device():
+    with _device_state_lock:
+        return jsonify(dict(_device_state))
+
+
+@app.route("/api/device/battery", methods=["GET", "POST"])
+def api_device_battery():
+    payload = request.get_json(silent=True) or {}
+    raw_level = request.args.get("level", payload.get("level"))
+    raw_voltage = request.args.get("voltage", payload.get("voltage"))
+
+    level = None
+    voltage = None
+    try:
+        if raw_level not in (None, ""):
+            level = float(raw_level)
+    except (TypeError, ValueError):
+        level = None
+    try:
+        if raw_voltage not in (None, ""):
+            voltage = float(raw_voltage)
+    except (TypeError, ValueError):
+        voltage = None
+
+    if level is not None:
+        level = max(0.0, min(100.0, level))
+
+    with _device_state_lock:
+        if level is not None:
+            _device_state["battery_level"] = round(level, 1)
+        if voltage is not None:
+            _device_state["battery_voltage"] = round(voltage, 3)
+        _device_state["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _device_state["source_ip"] = request.remote_addr
+        return jsonify(dict(_device_state))
+
+
 # ---------------------------------------------------------------------------
 # E-paper endpoints (Seeed reTerminal E1001 and similar e-ink panels)
 # ---------------------------------------------------------------------------
@@ -84,6 +133,9 @@ def epaper_png():
     data = epaper.render_png()
     resp = Response(data, mimetype="image/png")
     resp.set_etag(etag)
+    # Prevent stale intermediary caches from serving an older dashboard image.
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
     return resp
 
 

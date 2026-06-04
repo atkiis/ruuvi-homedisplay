@@ -13,9 +13,12 @@
 <header class="header">
   <div class="clock" id="clock">--:--</div>
   <div class="date"  id="date">--.--.----</div>
-  {% if demo_mode %}
-  <div class="demo-badge">DEMO&nbsp;MODE</div>
-  {% endif %}
+  <div class="header-right">
+    <div class="device-battery" id="device-battery">Display battery --</div>
+    {% if demo_mode %}
+    <div class="demo-badge">DEMO&nbsp;MODE</div>
+    {% endif %}
+  </div>
 </header>
 
 <main class="grid">
@@ -113,6 +116,7 @@
   const REFRESH_INTERVAL = {{ refresh_interval }};
   const RUUVI_KEYS = {{ tags.keys() | list | tojson }};
   const TAG_CONFIG  = {{ tags | tojson }};
+  const RUUVI_STALE_MINUTES = {{ ruuvi_stale_minutes }};
 </script>
 <script src="/static/js/dashboard.js"></script>
 </body>

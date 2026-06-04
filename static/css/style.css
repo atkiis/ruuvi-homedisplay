@@ -47,8 +47,23 @@ html, body {
   color: var(--text-muted);
 }
 
-.demo-badge {
+.header-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.device-battery {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-badge {
   background: var(--yellow);
   color: #000;
   padding: 4px 10px;
@@ -168,6 +183,15 @@ html, body {
 .card-updated {
   font-size: 0.65rem;
   color: var(--text-muted);
+}
+
+/* Sensor has old or missing data (e.g., weak BLE range). */
+.ruuvi-card.sensor-stale {
+  border-color: var(--yellow);
+}
+
+.ruuvi-card.sensor-stale .card-updated {
+  color: var(--yellow);
 }
 
 /* ── Electricity ─────────────────────────────────────────────────────────── */

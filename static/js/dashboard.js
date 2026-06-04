@@ -26,6 +26,12 @@ function setText(id, value) {
   if (el) el.textContent = value;
 }
 
+function toNumber(v) {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function priceClass(price) {
   if (price === null || price === undefined) return '';
   if (price < 5)   return 'price-cheap';
@@ -58,16 +64,59 @@ async function fetchRuuvi() {
   }
 }
 
+/* ── Display battery (E1001) ───────────────────────────────────────────── */
+async function fetchDeviceBattery() {
+  try {
+    const resp = await fetch('/api/device');
+    const data = await resp.json();
+    updateDeviceBattery(data);
+  } catch (e) {
+    console.warn('Device battery fetch error:', e);
+  }
+}
+
+function updateDeviceBattery(data) {
+  const el = document.getElementById('device-battery');
+  if (!el) return;
+
+  const level = toNumber(data?.battery_level);
+  const volt = toNumber(data?.battery_voltage);
+  const updated = data?.updated_at ? new Date(data.updated_at) : null;
+  const ageMin = updated ? Math.max(0, Math.floor((Date.now() - updated.getTime()) / 60000)) : null;
+
+  const parts = ['Display battery'];
+  parts.push(level !== null ? `${Math.round(level)}%` : '--%');
+  if (volt !== null) parts.push(`(${volt.toFixed(2)} V)`);
+  if (ageMin !== null && Number.isFinite(ageMin) && ageMin >= 5) {
+    parts.push(`stale ${ageMin} min`);
+  }
+
+  el.textContent = parts.join(' ');
+}
+
 function updateRuuvi(data) {
   for (const key of RUUVI_KEYS) {
     const tag  = TAG_CONFIG[key];
     const d    = data[key];
-    if (!d) continue;
-
     const card = document.getElementById(`card-${key}`);
 
-    const temp = d.temperature;
-    if (temp !== null && temp !== undefined) {
+    if (!d) {
+      setText(`${key}-temp`, '--');
+      setText(`${key}-hum`, '--%');
+      setText(`${key}-pres`, '-- hPa');
+      setText(`${key}-bat`, '-- V');
+      setText(`${key}-updated`, 'No signal');
+      const gauge = document.getElementById(`${key}-gauge`);
+      if (gauge) gauge.style.width = '0%';
+      if (card) {
+        card.dataset.tempLevel = '';
+        card.classList.add('sensor-stale');
+      }
+      continue;
+    }
+
+    const temp = toNumber(d.temperature);
+    if (temp !== null) {
       setText(`${key}-temp`, temp.toFixed(1));
       // Gauge fill (clamp 0–100%).
       const range = tag.temp_max - tag.temp_min;
@@ -78,18 +127,32 @@ function updateRuuvi(data) {
       if (card) card.dataset.tempLevel = tempLevel(temp, tag);
     } else {
       setText(`${key}-temp`, '--');
+      const gauge = document.getElementById(`${key}-gauge`);
+      if (gauge) gauge.style.width = '0%';
+      if (card) card.dataset.tempLevel = '';
     }
 
-    setText(`${key}-hum`,  d.humidity  !== null ? `${d.humidity.toFixed(0)}%`     : '--%');
-    setText(`${key}-pres`, d.pressure  !== null ? `${d.pressure.toFixed(0)} hPa`  : '-- hPa');
-    setText(`${key}-bat`,  d.battery   !== null ? `${d.battery.toFixed(2)} V`     : '-- V');
+    const humidity = toNumber(d.humidity);
+    const pressure = toNumber(d.pressure);
+    const battery  = toNumber(d.battery);
+    setText(`${key}-hum`,  humidity !== null ? `${humidity.toFixed(1)}%`    : '--%');
+    setText(`${key}-pres`, pressure !== null ? `${pressure.toFixed(1)} hPa` : '-- hPa');
+    setText(`${key}-bat`,  battery  !== null ? `${battery.toFixed(2)} V`    : '-- V');
 
     if (d.updated_at) {
       const dt = new Date(d.updated_at);
       const hh = String(dt.getHours()).padStart(2, '0');
       const mm = String(dt.getMinutes()).padStart(2, '0');
       const ss = String(dt.getSeconds()).padStart(2, '0');
-      setText(`${key}-updated`, `Updated ${hh}:${mm}:${ss}`);
+      const ageMin = Math.max(0, Math.floor((Date.now() - dt.getTime()) / 60000));
+      const staleMin = (typeof RUUVI_STALE_MINUTES !== 'undefined') ? RUUVI_STALE_MINUTES : 10;
+      const isStale = Number.isFinite(ageMin) && ageMin >= staleMin;
+      const staleTxt = isStale ? ` (stale ${ageMin} min)` : '';
+      setText(`${key}-updated`, `Updated ${hh}:${mm}:${ss}${staleTxt}`);
+      if (card) card.classList.toggle('sensor-stale', isStale);
+    } else {
+      setText(`${key}-updated`, 'No signal');
+      if (card) card.classList.add('sensor-stale');
     }
   }
 }
@@ -267,6 +330,7 @@ function escHtml(str) {
 /* ── Bootstrap all fetches ──────────────────────────────────────────────── */
 function refreshAll() {
   fetchRuuvi();
+  fetchDeviceBattery();
   fetchElectricity();
   fetchBuses();
 }
