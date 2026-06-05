@@ -87,8 +87,19 @@ function updateDeviceBattery(data) {
   const parts = ['Display battery'];
   parts.push(level !== null ? `${Math.round(level)}%` : '--%');
   if (volt !== null) parts.push(`(${volt.toFixed(2)} V)`);
-  if (ageMin !== null && Number.isFinite(ageMin) && ageMin >= 5) {
-    parts.push(`stale ${ageMin} min`);
+
+  if (level !== null) {
+    // Data received — warn when stale.
+    if (ageMin !== null && Number.isFinite(ageMin) && ageMin >= 5) {
+      parts.push(`stale ${ageMin} min`);
+    }
+  } else {
+    // No battery reading yet — show contact age or "never synced".
+    if (ageMin !== null && Number.isFinite(ageMin)) {
+      parts.push(`(last contact ${ageMin} min ago)`);
+    } else {
+      parts.push('(never synced)');
+    }
   }
 
   el.textContent = parts.join(' ');

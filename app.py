@@ -9,6 +9,7 @@ Or with a production WSGI server:
 """
 
 import logging
+import math
 import threading
 from datetime import datetime, timezone
 
@@ -98,12 +99,14 @@ def api_device_battery():
     voltage = None
     try:
         if raw_level not in (None, ""):
-            level = float(raw_level)
+            v = float(raw_level)
+            level = None if math.isnan(v) or math.isinf(v) else v
     except (TypeError, ValueError):
         level = None
     try:
         if raw_voltage not in (None, ""):
-            voltage = float(raw_voltage)
+            v = float(raw_voltage)
+            voltage = None if math.isnan(v) or math.isinf(v) else v
     except (TypeError, ValueError):
         voltage = None
 
