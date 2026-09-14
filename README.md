@@ -213,6 +213,10 @@ events into a larger single-day layout. Normal agendas show both days. Event
 start and end times are rendered as separate high-contrast values so the end
 time remains easy to read on the e-paper panel.
 
+Events remain visible for one hour after their scheduled end, then are omitted
+from both the browser preview and the next E1002 image render. Adjust
+`CALENDAR_EVENT_RETENTION_HOURS` in `config.py` to change this grace period.
+
 The upload endpoint is intended for a trusted home network and has no built-in
 authentication. Do not expose it directly to the public internet.
 

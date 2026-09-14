@@ -7,6 +7,7 @@ agenda and the same electricity summary.
 """
 
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import config
 import calendar_backend
@@ -32,9 +33,21 @@ def _category(raw) -> str:
     return calendar_backend.category_palette(raw)
 
 
+def _now() -> datetime:
+    timezone = ZoneInfo(getattr(config, "CALENDAR_TIMEZONE", "Europe/Helsinki"))
+    return datetime.now(timezone)
+
+
+def _as_aware(value: datetime) -> datetime:
+    timezone = ZoneInfo(getattr(config, "CALENDAR_TIMEZONE", "Europe/Helsinki"))
+    return value.replace(tzinfo=timezone) if value.tzinfo is None else value.astimezone(timezone)
+
+
 def sections() -> list[dict]:
     """Group configured events into TODAY / TOMORROW rows."""
-    today = datetime.now().date()
+    now = _now()
+    today = now.date()
+    expiry = now - timedelta(hours=getattr(config, "CALENDAR_EVENT_RETENTION_HOURS", 1))
     day_of = {today: "today", today + timedelta(days=1): "tomorrow"}
     grouped: dict[str, list[dict]] = {"today": [], "tomorrow": []}
 
@@ -55,6 +68,8 @@ def sections() -> list[dict]:
             end = datetime.fromisoformat(str(entry.get("end")))
         except ValueError:
             end = start + timedelta(hours=1)
+        if _as_aware(end) <= expiry:
+            continue
         grouped[day].append(
             {
                 "start": start.strftime("%H:%M"),

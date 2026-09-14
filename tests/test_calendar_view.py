@@ -13,6 +13,19 @@ def _event(title):
 
 
 class CalendarViewTests(unittest.TestCase):
+    def test_events_are_removed_one_hour_after_their_end(self):
+        with patch.object(calendar_view, "_now", return_value=calendar_view.datetime.fromisoformat(
+            "2026-09-14T14:00:00+03:00"
+        )), patch.object(calendar_view.calendar_backend, "load_events", return_value=[
+            {"time": "2026-09-14T09:00:00+03:00", "end": "2026-09-14T10:00:00+03:00",
+             "category": "blue", "title": "Expired"},
+            {"time": "2026-09-14T11:00:00+03:00", "end": "2026-09-14T13:30:00+03:00",
+             "category": "blue", "title": "Within grace"},
+        ]):
+            displayed = calendar_view.sections()
+
+        self.assertEqual([event["title"] for event in displayed[0]["events"]], ["Within grace"])
+
     def test_busy_today_uses_one_dense_section(self):
         sections = [_section("Today", [_event(str(index)) for index in range(5)]),
                     _section("Tomorrow", [_event("tomorrow")])]
