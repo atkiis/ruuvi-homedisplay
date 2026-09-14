@@ -183,7 +183,7 @@ management endpoints are:
 
 | Endpoint | Use |
 |---|---|
-| `POST /api/calendar/upload` | Upload an `.ics` file in the `calendar` multipart field |
+| `POST /api/calendar/upload` | Upload an `.ics` file in the `calendar` multipart field with `category` set to `red`, `green`, `blue`, or `yellow` |
 | `GET /api/calendar` | Return upload status, event count, and update time |
 | `DELETE /api/calendar` | Remove the uploaded calendar and return to configured/demo events |
 
@@ -191,6 +191,17 @@ The E1002 continues to download the unchanged `/epaper-e1002.png` endpoint.
 The server invalidates its image cache after a successful upload; the physical
 panel updates on its next ESPHome wake cycle, which is hourly in the example
 configuration.
+
+The selected upload category is applied to every imported event in that file,
+so one calendar feed can be assigned to Priority, Personal, Work, or Health
+without editing the source calendar. Embedded ICS categories are used only
+when importing through the backend directly without an upload override.
+
+The E1002 calendar layout adapts to the agenda: five or more events today use
+the full display in a denser layout, while an empty today promotes tomorrow's
+events into a larger single-day layout. Normal agendas show both days. Event
+start and end times are rendered as separate high-contrast values so the end
+time remains easy to read on the e-paper panel.
 
 The upload endpoint is intended for a trusted home network and has no built-in
 authentication. Do not expose it directly to the public internet.

@@ -24,31 +24,42 @@ substitutions:
   device_name: ruuvi-homedisplay-e1002
   # Base URL of the machine running app.py (no trailing slash).
   server_base_url: "http://192.168.1.150:5001"
-  # How often to wake, re-download the image and refresh the panel.
-  # The layout is intended to update once an hour.
+  # The device wakes, updates once, then sleeps for the remainder of the hour.
   refresh_interval: "1h"
-  # ── Battery / deep-sleep tuning ──────────────────────────────────────────
-  # How long to stay awake per cycle. Must be long enough for WiFi connect
-  # (~3 s) + image download + panel redraw.
-  run_duration: "50s"
-  # Must match refresh_interval minus run_duration (so total cycle = interval).
-  sleep_duration: "59m10s"
+  # Safety timeout if Wi-Fi or the image download never completes.
+  run_duration: "2min"
+  # Approximate hourly cadence including the active boot/update period.
+  sleep_duration: "58min"
 
 esphome:
   name: ${device_name}
+
   on_boot:
     - priority: 600
       then:
         - output.turn_on: battery_measure_enable
+
     - priority: -100
       then:
-        - delay: 6s
-        - logger.log:
-            level: DEBUG
-            format: "Battery: voltage=%.3fV  level=%.1f%%"
-            args: [id(battery_voltage).state, id(battery_level).state]
-        - output.turn_off: battery_measure_enable
-        - script.execute: refresh_image
+        - wait_until:
+            condition:
+              wifi.connected:
+            timeout: 120s
+
+        - if:
+            condition:
+              wifi.connected:
+            then:
+              - logger.log: "WiFi connected - refreshing dashboard"
+              - delay: 2s
+              - script.execute: refresh_image
+            else:
+              - logger.log:
+                  level: ERROR
+                  format: "WiFi still not connected - sleeping until next cycle"
+              - output.turn_off: battery_measure_enable
+              - deep_sleep.enter:
+                  id: deep_sleep_1
 
 esp32:
   variant: esp32s3
@@ -56,12 +67,17 @@ esp32:
   framework:
     type: esp-idf
 
+psram:
+  mode: octal
+  speed: 80MHz
+
 spi:
   clk_pin: GPIO7
   mosi_pin: GPIO9
 
 logger:
   level: DEBUG
+  hardware_uart: UART0
 
 api:
   reboot_timeout: 0s
@@ -72,6 +88,8 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # Reuse the known AP/channel from flash instead of scanning every boot.
+  # This is more reliable for a fixed home display and shortens reconnect time.
   fast_connect: true
   power_save_mode: none
 
@@ -136,47 +154,60 @@ online_image:
     http_request_id: http_client
     format: PNG
     type: RGB565
+    buffer_size: 65536
     update_interval: never
+
     on_download_finished:
+      - logger.log: "Image downloaded - updating e-paper"
       - component.update: epaper
+      - delay: 15s
+      - output.turn_off: battery_measure_enable
+      - logger.log: "E-paper update complete - sleeping until next cycle"
       - deep_sleep.enter:
           id: deep_sleep_1
 
 # The actual `display:` block must come from Seeed's board package. The lambda
 # should simply blit the downloaded image at 0,0.
 #
-# display:
-#   - platform: <seeed reterminal e-paper platform>
-#     id: epaper
-#     update_interval: never
-#     lambda: |-
-#       it.image(0, 0, id(dashboard_image));
+display:
+  - platform: epaper_spi
+    id: epaper
+    model: Seeed-reTerminal-E1002
+    update_interval: never
+    lambda: |-
+      it.image(0, 0, id(dashboard_image));
 
 # ── Core refresh logic ────────────────────────────────────────────────────────
 script:
   - id: refresh_image
     mode: single
     then:
-      - http_request.get:
-          url: !lambda |-
-            if (!isnan(id(battery_voltage).state) && !isnan(id(battery_level).state)) {
-              return str_sprintf("${server_base_url}/api/device/battery?level=%.1f&voltage=%.3f",
-                                 id(battery_level).state, id(battery_voltage).state);
-            }
-            return std::string("${server_base_url}/api/device/battery");
-      - component.update: dashboard_image
+      - if:
+          condition:
+            wifi.connected:
+          then:
+            - http_request.get:
+                url: !lambda |-
+                  if (!isnan(id(battery_voltage).state) && !isnan(id(battery_level).state)) {
+                    return str_sprintf(
+                      "${server_base_url}/api/device/battery?level=%.1f&voltage=%.3f",
+                      id(battery_level).state,
+                      id(battery_voltage).state
+                    );
+                  }
+                  return std::string("${server_base_url}/api/device/battery");
 
-# ── Hourly wake cycle ────────────────────────────────────────────────────────
-# Comment out the deep_sleep block below and the on_boot actions above if you
-# want USB-powered always-on mode for debugging or OTA updates, then use the
-# interval block instead.
-#
-# interval:
-#   - interval: ${refresh_interval}
-#     then:
-#       - script.execute: refresh_image
+            - component.update: dashboard_image
 
-# ── Battery-powered mode: deep sleep between refreshes ───────────────────────
+          else:
+            - logger.log:
+                level: ERROR
+                format: "WiFi not connected - skipping dashboard refresh"
+
+# ── Hourly battery-powered cycle ─────────────────────────────────────────────
+# The image callback enters deep sleep after a successful refresh. The
+# run_duration timeout covers Wi-Fi/API failures; the failure branch above
+# enters the same sleep cycle when Wi-Fi never connects.
 deep_sleep:
   id: deep_sleep_1
   run_duration: ${run_duration}

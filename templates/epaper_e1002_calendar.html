@@ -139,8 +139,15 @@
     padding: 8px 14px 6px;
   }
 
-  .section.today { flex: 0 0 auto; }
-  .section.next  { flex: 1 1 auto; }
+  .section { flex: 1 1 auto; }
+  .section.dense .event { height: 34px; margin-bottom: 3px; }
+  .section.dense .event .badge { height: 34px; }
+  .section.dense .event .time { flex-basis: 122px; font-size: 16px; }
+  .section.dense .event .title { font-size: 17px; }
+  .section.expanded .event { height: 50px; }
+  .section.expanded .event .badge { height: 50px; }
+  .section.expanded .event .time { flex-basis: 145px; font-size: 20px; }
+  .section.expanded .event .title { font-size: 22px; }
 
   .section-head {
     display: flex;
@@ -213,17 +220,22 @@
   .badge.yellow { background: var(--yellow); }
 
   .event .time {
-    flex: 0 0 130px;
+    flex: 0 0 138px;
     font-size: 18px;
     font-weight: 700;
     letter-spacing: 0.3px;
     white-space: nowrap;
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
   }
 
-  .event .time .to {
-    font-weight: 600;
+  .event .time .separator {
+    font-weight: 400;
     color: var(--muted);
   }
+
+  .event .time .end { font-weight: 700; }
 
   .event .title {
     flex: 1 1 auto;
@@ -282,6 +294,14 @@
 <form id="calendar-upload" enctype="multipart/form-data" style="position:fixed;left:12px;bottom:12px;z-index:2;background:#fff;padding:8px;border:1px solid #000;font:14px sans-serif">
   <label for="calendar-file">Calendar (.ics)</label>
   <input id="calendar-file" name="calendar" type="file" accept=".ics,text/calendar" required>
+  <label for="calendar-category">Category</label>
+  <select id="calendar-category" name="category" required>
+    <option value="" selected disabled>Choose</option>
+    <option value="red">Priority</option>
+    <option value="green">Personal</option>
+    <option value="blue">Work</option>
+    <option value="yellow">Health</option>
+  </select>
   <button type="submit">Upload</button>
   <button id="calendar-clear" type="button">Clear</button>
   <span id="calendar-status">{{ calendar_status.event_count }} imported events</span>
@@ -315,7 +335,7 @@
 
   <main class="body">
     {% for section in sections %}
-    <section class="section {{ 'today' if loop.first else 'next' }}">
+    <section class="section {{ section.layout }}">
       <div class="section-head">
         <h2>{{ section.title }}</h2>
         <span class="date">{{ section.date }}</span>
@@ -324,7 +344,7 @@
       {% for event in section.events %}
       <div class="event {{ event.category }}">
         <i class="badge {{ event.category }}"></i>
-        <span class="time">{{ event.start }} <span class="to">– {{ event.end }}</span></span>
+        <span class="time"><span>{{ event.start }}</span><span class="separator">→</span><span class="end">{{ event.end }}</span></span>
         <span class="title">{{ event.title }}</span>
       </div>
       {% else %}

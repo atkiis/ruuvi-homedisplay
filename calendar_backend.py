@@ -43,7 +43,7 @@ def _event_datetime(value) -> datetime:
     raise CalendarImportError("VEVENT has an invalid DTSTART or DTEND")
 
 
-def _normalize_event(component) -> dict:
+def _normalize_event(component, category_override: str | None = None) -> dict:
     title = _as_text(component.get("SUMMARY")).strip()
     if not title:
         raise CalendarImportError("VEVENT is missing SUMMARY")
@@ -60,7 +60,7 @@ def _normalize_event(component) -> dict:
     if end <= start:
         end = start + (timedelta(days=1) if all_day else timedelta(hours=1))
 
-    category = _as_text(component.get("CATEGORIES")).split(",", 1)[0].lower().strip()
+    category = category_override or _as_text(component.get("CATEGORIES")).split(",", 1)[0].lower().strip()
     if category not in getattr(config, "CALENDAR_CATEGORY_COLORS", {}):
         category = "blue"
     return {
@@ -79,10 +79,14 @@ def _window() -> tuple[datetime, datetime]:
     return start, start + timedelta(days=days)
 
 
-def parse_ics(raw: bytes) -> list[dict]:
+def parse_ics(raw: bytes, category: str | None = None) -> list[dict]:
     """Parse an ICS document and return normalized events in the display window."""
     if not isinstance(raw, bytes) or not raw.strip():
         raise CalendarImportError("The uploaded calendar file is empty")
+    valid_categories = getattr(config, "CALENDAR_CATEGORY_COLORS", {})
+    if category is not None and category not in valid_categories:
+        raise CalendarImportError("Choose a valid calendar category")
+
     try:
         calendar = Calendar.from_ical(raw)
     except Exception as exc:
@@ -101,7 +105,7 @@ def parse_ics(raw: bytes) -> list[dict]:
         if component.name != "VEVENT":
             continue
         try:
-            event = _normalize_event(component)
+            event = _normalize_event(component, category)
         except CalendarImportError:
             continue
         event_start = datetime.fromisoformat(event["time"])
@@ -151,8 +155,8 @@ def save_events(events: list[dict]) -> None:
             os.unlink(temporary)
 
 
-def import_ics(raw: bytes) -> list[dict]:
-    events = parse_ics(raw)
+def import_ics(raw: bytes, category: str | None = None) -> list[dict]:
+    events = parse_ics(raw, category)
     save_events(events)
     return events
 

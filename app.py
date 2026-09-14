@@ -217,7 +217,7 @@ def epaper_e1002_calendar():
     return render_template(
         "epaper_e1002_calendar.html",
         summary=calendar_view.summary(),
-        sections=calendar_view.sections(),
+        sections=calendar_view.display_sections(),
         updated=datetime.now().strftime("%H:%M"),
         calendar_status=calendar_backend.status(),
     )
@@ -235,16 +235,20 @@ def api_calendar():
 @app.route("/api/calendar/upload", methods=["POST"])
 def api_calendar_upload():
     upload = request.files.get("calendar")
+    category = request.form.get("category", "").strip().lower()
+    valid_categories = getattr(config, "CALENDAR_CATEGORY_COLORS", {})
     max_bytes = int(getattr(config, "CALENDAR_MAX_UPLOAD_BYTES", 1024 * 1024))
     if upload is None or not upload.filename:
         return jsonify({"error": "Choose an .ics calendar file."}), 400
     if not upload.filename.lower().endswith(".ics"):
         return jsonify({"error": "Upload an iCalendar file with an .ics extension."}), 400
+    if category not in valid_categories:
+        return jsonify({"error": "Choose a category for the imported events."}), 400
     raw = upload.read(max_bytes + 1)
     if len(raw) > max_bytes:
         return jsonify({"error": "The calendar file is too large."}), 413
     try:
-        events = calendar_backend.import_ics(raw)
+        events = calendar_backend.import_ics(raw, category)
     except calendar_backend.CalendarImportError as exc:
         return jsonify({"error": str(exc)}), 400
     epaper.invalidate_render_cache()

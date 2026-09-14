@@ -1626,6 +1626,11 @@ def _cal_draw_topbar(draw, w, summary):
 
 
 def _cal_draw_section(draw, x, y, w, h, section):
+    layout = section.get("layout", "normal")
+    row_h = {"dense": 34, "expanded": 50, "normal": _CAL_ROW_H}.get(layout, _CAL_ROW_H)
+    row_gap = 3 if layout == "dense" else _CAL_ROW_GAP
+    time_size = 16 if layout == "dense" else (20 if layout == "expanded" else 18)
+    title_size = 17 if layout == "dense" else (22 if layout == "expanded" else 20)
     draw.rounded_rectangle([x, y, x + w, y + h], radius=10, fill=_CAL_PAPER)
 
     inner_x = x + 14
@@ -1647,28 +1652,32 @@ def _cal_draw_section(draw, x, y, w, h, section):
         return
 
     for event in section["events"]:
-        if row_y + _CAL_ROW_H > y + h:
+        if row_y + row_h > y + h:
             break
         category = event.get("category", "blue")
-        draw.rounded_rectangle([inner_x, row_y, inner_x + inner_w, row_y + _CAL_ROW_H],
+        draw.rounded_rectangle([inner_x, row_y, inner_x + inner_w, row_y + row_h],
                                radius=6, fill=_CAL_TINT.get(category, _CAL_TINT["blue"]))
         # Colour bar flush with the rounded card edge.
-        draw.rectangle([inner_x + 3, row_y, inner_x + 10, row_y + _CAL_ROW_H],
+        draw.rectangle([inner_x + 3, row_y, inner_x + 10, row_y + row_h],
                        fill=_CAL_ACCENT.get(category, _CAL_ACCENT["blue"]))
-        draw.rounded_rectangle([inner_x, row_y, inner_x + 8, row_y + _CAL_ROW_H],
+        draw.rounded_rectangle([inner_x, row_y, inner_x + 8, row_y + row_h],
                                radius=6, fill=_CAL_ACCENT.get(category, _CAL_ACCENT["blue"]))
 
-        mid_y = row_y + _CAL_ROW_H / 2 + 1
+        mid_y = row_y + row_h / 2 + 1
         text_x = inner_x + 22
         start = str(event.get("start", ""))
-        _cal_text(draw, (text_x, mid_y), start, 18, bold=True, anchor="lm")
-        _cal_text(draw, (text_x + _text_width(start, 18, True) + 6, mid_y),
-                  f"– {event.get('end', '')}", 18, fill=_CAL_MUTED, anchor="lm")
-        title_x = text_x + 130
+        end = str(event.get("end", ""))
+        _cal_text(draw, (text_x, mid_y), start, time_size, bold=True, anchor="lm")
+        start_w = _text_width(start, time_size, True)
+        _cal_text(draw, (text_x + start_w + 5, mid_y), "→", time_size - 2,
+                  fill=_CAL_MUTED, anchor="lm")
+        end_x = text_x + start_w + 21
+        _cal_text(draw, (end_x, mid_y), end, time_size, bold=True, anchor="lm")
+        title_x = text_x + (145 if layout == "expanded" else 138 if layout == "normal" else 125)
         _cal_text(draw, (title_x, mid_y),
-                  _fit(str(event.get("title", "")), 20, inner_x + inner_w - 12 - title_x),
-                  20, bold=True, anchor="lm")
-        row_y += _CAL_ROW_H + _CAL_ROW_GAP
+                  _fit(str(event.get("title", "")), title_size, inner_x + inner_w - 12 - title_x),
+                  title_size, bold=True, anchor="lm")
+        row_y += row_h + row_gap
 
 
 def _cal_draw_legend(draw, w, h, updated):
@@ -1697,19 +1706,22 @@ def _render_e1002_calendar() -> Image.Image:
 
     _cal_draw_topbar(draw, w, calendar_view.summary())
 
-    sections = calendar_view.sections()
+    sections = calendar_view.display_sections()
     body_top = _CAL_TOP_H + 8
     body_bottom = h - _CAL_FOOT_H - 8
     sheet_x = 20
     sheet_w = w - 40
 
-    today, tomorrow = sections[0], sections[1]
-    today_h = _cal_sheet_height(today)
-    tomorrow_top = body_top + today_h + _CAL_SHEET_GAP
-
-    _cal_draw_section(draw, sheet_x, body_top, sheet_w, today_h, today)
-    _cal_draw_section(draw, sheet_x, tomorrow_top, sheet_w,
-                      max(_cal_sheet_height(tomorrow), body_bottom - tomorrow_top), tomorrow)
+    if len(sections) == 1:
+        section = sections[0]
+        _cal_draw_section(draw, sheet_x, body_top, sheet_w, body_bottom - body_top, section)
+    else:
+        today, tomorrow = sections
+        today_h = _cal_sheet_height(today)
+        tomorrow_top = body_top + today_h + _CAL_SHEET_GAP
+        _cal_draw_section(draw, sheet_x, body_top, sheet_w, today_h, today)
+        _cal_draw_section(draw, sheet_x, tomorrow_top, sheet_w,
+                          max(_cal_sheet_height(tomorrow), body_bottom - tomorrow_top), tomorrow)
 
     _cal_draw_legend(draw, w, h, datetime.now(tz=_HELSINKI).strftime("%H:%M"))
 
@@ -1720,5 +1732,8 @@ def _render_e1002_calendar() -> Image.Image:
 
 def _cal_sheet_height(section: dict) -> int:
     rows = len(section["events"])
-    body = (rows * (_CAL_ROW_H + _CAL_ROW_GAP) - _CAL_ROW_GAP) if rows else 34
+    layout = section.get("layout", "normal")
+    row_h = {"dense": 34, "expanded": 50, "normal": _CAL_ROW_H}.get(layout, _CAL_ROW_H)
+    row_gap = 3 if layout == "dense" else _CAL_ROW_GAP
+    body = (rows * (row_h + row_gap) - row_gap) if rows else 34
     return _CAL_HEAD_H + 7 + body + 6

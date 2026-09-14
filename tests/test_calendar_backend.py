@@ -76,7 +76,10 @@ class CalendarBackendTests(unittest.TestCase):
             calendar_backend.config,
             "CALENDAR_STORAGE_PATH",
             str(Path(directory) / "calendar.json"),
-        ):
+        ), patch.object(calendar_backend, "_window", return_value=(
+            datetime.fromisoformat("2026-09-12T00:00:00+03:00"),
+            datetime.fromisoformat("2026-09-14T00:00:00+03:00"),
+        )):
             calendar_backend.import_ics(ICS)
             status = calendar_backend.status()
             self.assertTrue(status["uploaded"])
@@ -87,6 +90,19 @@ class CalendarBackendTests(unittest.TestCase):
     def test_empty_input_is_rejected(self):
         with self.assertRaises(calendar_backend.CalendarImportError):
             calendar_backend.parse_ics(b" ")
+
+    def test_upload_category_overrides_ics_categories(self):
+        with patch.object(calendar_backend, "_window", return_value=(
+            datetime.fromisoformat("2026-09-12T00:00:00+03:00"),
+            datetime.fromisoformat("2026-09-14T00:00:00+03:00"),
+        )):
+            events = calendar_backend.parse_ics(ICS, "yellow")
+
+        self.assertEqual({event["category"] for event in events}, {"yellow"})
+
+    def test_invalid_upload_category_is_rejected(self):
+        with self.assertRaises(calendar_backend.CalendarImportError):
+            calendar_backend.parse_ics(ICS, "purple")
 
     def test_daily_recurrence_is_bounded_to_the_display_window(self):
         with patch.object(calendar_backend, "_window", return_value=(

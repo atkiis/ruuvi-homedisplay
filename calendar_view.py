@@ -93,3 +93,21 @@ def sections() -> list[dict]:
             "events": grouped["tomorrow"],
         },
     ]
+
+
+def display_sections() -> list[dict]:
+    """Choose the calendar layout that makes best use of the 800x480 panel."""
+    all_sections = sections()
+    today, tomorrow = all_sections
+
+    # A busy current day deserves the whole panel; showing a clipped second
+    # section is less useful than showing every current-day event.
+    if len(today["events"]) >= 5:
+        return [dict(today, layout="dense")]
+
+    # When today is empty, promote tomorrow and give its events more breathing
+    # room instead of rendering an empty section above it.
+    if not today["events"] and tomorrow["events"]:
+        return [dict(tomorrow, layout="expanded")]
+
+    return [dict(section, layout="normal") for section in all_sections]
