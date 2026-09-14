@@ -8,6 +8,7 @@ We cache the result for 15 minutes to avoid hammering the upstream service.
 import logging
 import threading
 import time
+from multiprocessing import parent_process
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,9 @@ _REFRESH_INTERVAL = 900  # background refresh cadence (seconds)
 
 def start() -> None:
     """Start a daemon thread that keeps the price cache warm in the background."""
+    if parent_process() is not None:
+        logger.debug("Electricity refresher skipped in multiprocessing child process.")
+        return
     def _loop() -> None:
         while True:
             _refresh()
@@ -57,6 +61,46 @@ def get_prices() -> dict:
         return {"hours": [], "current": None, "unit": "c/kWh",
                 "error": "Electricity data unavailable"}
     return _patch_current(cache)
+
+
+def get_summary() -> dict:
+    """Return the day's average / peak / cheapest price blocks.
+
+    Peak and cheapest are contiguous hour runs around the extreme hour (within
+    20 % of it), so the header shows a usable time window instead of a single
+    hour. Values are c/kWh, tax included.
+    """
+    hours = get_prices().get("hours") or []
+    if not hours:
+        return {"unit": "c/kWh", "average": None, "peak": None, "cheapest": None}
+
+    values = [float(h.get("price_with_tax", 0.0)) for h in hours]
+    hi = max(values)
+    lo = min(values)
+
+    def _block(target: float, keep) -> dict:
+        index = values.index(target)
+        start = end = index
+        while start > 0 and keep(values[start - 1]):
+            start -= 1
+        while end < len(values) - 1 and keep(values[end + 1]):
+            end += 1
+        start_hour = int(hours[start].get("hour", 0))
+        end_hour = (int(hours[end].get("hour", 0)) + 1) % 24
+        return {
+            "price": round(target, 1),
+            "start": f"{start_hour:02d}:00",
+            "end": f"{end_hour:02d}:00",
+        }
+
+    hi_cut = hi * 0.8
+    lo_cut = lo * 1.2 if lo >= 0 else lo * 0.8
+    return {
+        "unit": "c/kWh",
+        "average": round(sum(values) / len(values), 1),
+        "peak": _block(hi, lambda v: v >= hi_cut),
+        "cheapest": _block(lo, lambda v: v <= lo_cut),
+    }
 
 
 def _refresh() -> None:

@@ -10,6 +10,7 @@ Results are cached for 60 seconds so rapid page refreshes don't hammer the API.
 import logging
 import threading
 import time
+from multiprocessing import parent_process
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -57,6 +58,9 @@ query StopDepartures($stopId: String!, $count: Int!) {
 
 def start() -> None:
     """Start a daemon thread that keeps the departure cache warm in the background."""
+    if parent_process() is not None:
+        logger.debug("Bus refresher skipped in multiprocessing child process.")
+        return
     def _loop() -> None:
         while True:
             _refresh()

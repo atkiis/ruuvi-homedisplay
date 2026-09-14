@@ -10,21 +10,21 @@
 
 RUUVI_TAGS = {
     "sauna": {
-        "mac": "AA:BB:CC:DD:EE:01",   # ← replace with actual MAC
+        "mac": "",   # ← replace with actual MAC
         "name": "Sauna",
         "icon": "🔥",
         "temp_min": 20,
         "temp_max": 120,
     },
     "balcony": {
-        "mac": "EC:40:38:F3:A9:2E",   # ← replace with actual MAC
+        "mac": "",   # ← replace with actual MAC
         "name": "Balcony",
         "icon": "🌤",
         "temp_min": -50,
         "temp_max": 50,
     },
     "freezer": {
-        "mac": "E1:AC:E3:FB:70:91",   # ← replace with actual MAC
+        "mac": "",   # ← replace with actual MAC
         "name": "Freezer",
         "icon": "❄️",
         "temp_min": -40,
@@ -79,6 +79,14 @@ DIGITRANSIT_API_KEY = ""
 # spot-hinta.fi is a free, open Finnish electricity price API.
 ELECTRICITY_API_URL = "https://api.spot-hinta.fi/Today"
 
+# ── Weather API (Open-Meteo) ────────────────────────────────────────────────
+# Open-Meteo (https://open-meteo.com) is free and needs no API key. Set the
+# coordinates of the location you want the forecast for.
+WEATHER_API_URL = "https://api.open-meteo.com/v1/forecast"
+WEATHER_LAT = 61.4481      # ← your latitude  (default: Partola, Pirkkala)
+WEATHER_LON = 23.6450      # ← your longitude
+WEATHER_NAME = "Partola"   # Human-readable label shown on screen.
+
 # ── General display settings ────────────────────────────────────────────────
 # Page auto-refresh interval in seconds (also controls polling from browser).
 REFRESH_INTERVAL = 60
@@ -99,13 +107,61 @@ EPAPER_ROTATE = 0         # Rotate the rendered image (0/90/180/270) if mounted 
 # Set True only for the 6-colour reTerminal E1002; adds red highlights for
 # expensive electricity hours. Leave False for the monochrome E1001.
 EPAPER_COLOR = False
+# Invert black<->white in the served image. Some panels interpret 1-bit pixels
+# with the opposite polarity, so the dashboard appears with a black background
+# even though the PNG preview looks correct. Set True to flip it.
+EPAPER_INVERT = True
 # Layout orientation: "landscape" (800x480, panel horizontal) or
 # "portrait" (480x800, panel mounted vertically).  All /epaper endpoints
 # will serve the chosen layout automatically.
 EPAPER_ORIENTATION = "landscape"
+# Default e-paper dashboard layout. Keep "e1001" for the current mono layout;
+# set "e1002" for the 7.3" colour calendar view (same design as the HTML
+# preview at /epaper-e1002), or "e1002-dashboard" for the older colour
+# weather/price dashboard. Can also be passed as ?layout=... in the URL.
+EPAPER_LAYOUT = "e1001"
 # Force all text to bold weight.  Recommended for most monochrome e-paper
 # panels where thin strokes are too faint to read at normal viewing distance.
 EPAPER_FORCE_BOLD = True
+
+# Optional calendar feed for the E1002 layout. Add items as:
+#   {"time": "2026-07-06T18:30:00+03:00", "title": "Dentist"}
+# Optional extra keys used by the 7.3" colour calendar view (/epaper-e1002):
+#   "end": "2026-07-06T19:15:00+03:00", "category": "red"|"green"|"blue"|"yellow"
+# The renderer shows upcoming entries in the calendar panel; leave empty if
+# you do not want a calendar block yet.
+CALENDAR_EVENTS = []
+
+# Uploaded E1002 calendar data is stored as normalized events, not raw ICS.
+CALENDAR_STORAGE_PATH = "instance/calendar.json"
+CALENDAR_TIMEZONE = "Europe/Helsinki"
+CALENDAR_MAX_UPLOAD_BYTES = 1024 * 1024
+CALENDAR_LOOKAHEAD_DAYS = 7
+
+# Fallback agenda shown on the colour calendar view while CALENDAR_EVENTS is
+# empty. "day" is either "today" or "tomorrow".
+CALENDAR_DEMO_EVENTS = [
+    {"day": "today", "start": "09:00", "end": "10:00", "category": "red",
+     "title": "Team Sync & Project Kickoff"},
+    {"day": "today", "start": "11:30", "end": "12:30", "category": "green",
+     "title": "Lunch with Client (Downtown)"},
+    {"day": "today", "start": "14:00", "end": "15:30", "category": "blue",
+     "title": "Sprint Review & Demo"},
+    {"day": "today", "start": "18:00", "end": "19:00", "category": "yellow",
+     "title": "Workout at Gym"},
+    {"day": "tomorrow", "start": "08:30", "end": "09:15", "category": "blue",
+     "title": "Quarterly Planning Session"},
+    {"day": "tomorrow", "start": "19:30", "end": "21:00", "category": "yellow",
+     "title": "Family Dinner"},
+]
+
+# Category → e-paper palette colour used for the event badge.
+CALENDAR_CATEGORY_COLORS = {
+    "red": "#c00000",      # priority
+    "green": "#008000",    # personal
+    "blue": "#0040c0",     # work
+    "yellow": "#e0b000",   # health / fitness
+}
 
 # ── Sauna view ───────────────────────────────────────────────────────────────
 # When the sauna tag temperature rises above SAUNA_TEMP_THRESHOLD the e-paper

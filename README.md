@@ -126,8 +126,11 @@ The server exposes three extra endpoints (no extra services to run):
 | Endpoint | Use |
 |---|---|
 | `/epaper.png` | 800×480 image for ESPHome's `online_image` (recommended) |
+| `/epaper-e1002.png` | 800×480 colour image for the E1002 layout |
 | `/epaper.bmp` | 1-bit BMP for bare Arduino sketches |
+| `/epaper-e1002.bmp` | BMP for the E1002 layout |
 | `/epaper` | HTML preview to tweak the layout in a desktop browser |
+| `/epaper-e1002` | HTML preview for the E1002 layout |
 
 The image is rendered for a small, slow, 1-bit screen: big high-contrast text,
 no emoji, a hand-drawn 24-hour electricity chart, and only the soonest bus
@@ -140,7 +143,7 @@ EPAPER_ROTATE = 0       # 90/180/270 if mounted sideways
 EPAPER_COLOR  = False   # True only for the 6-colour reTerminal E1002
 ```
 
-Preview it locally before flashing anything:
+Preview the default layout locally before flashing anything:
 
 ```bash
 python app.py
@@ -150,18 +153,47 @@ python app.py
 ### Flashing the device (ESPHome)
 
 A starter config lives in [esphome/ruuvi-homedisplay-e1001.yaml](esphome/ruuvi-homedisplay-e1001.yaml).
-It wakes the board on an interval, downloads `/epaper.png`, and refreshes the
-panel (e-ink holds the image with no power between updates). Edit the
-`substitutions:` block with your WiFi and the server URL, add Seeed's official
-reTerminal E1001 board/display definition where indicated, then:
+It refreshes the monochrome E1001 layout on the existing `/epaper.png` route.
+
+For the colour panel, use [esphome/ruuvi-homedisplay-e1002.yaml](esphome/ruuvi-homedisplay-e1002.yaml).
+It wakes once an hour, downloads `/epaper-e1002.png`, and refreshes the colour
+layout. Edit the `substitutions:` block with your WiFi and the server URL, add
+Seeed's official board/display definition where indicated, then:
 
 ```bash
 esphome run esphome/ruuvi-homedisplay-e1001.yaml
+esphome run esphome/ruuvi-homedisplay-e1002.yaml
 ```
 
 > Because e-paper refreshes are slow and wear the panel, keep the update
 > interval generous (5–15 min). The sensor, electricity, and bus data all change
 > slowly enough that this is plenty.
+
+### Updating the E1002 calendar
+
+Open `http://localhost:5001/epaper-e1002` in a browser on the trusted home
+network and use the calendar upload control to select an `.ics` file. The
+server parses the file, keeps only the event fields needed by the display, and
+stores the last valid normalized calendar in `instance/calendar.json`.
+
+The calendar service uses `Europe/Helsinki` by default and supports timed
+events, all-day events, categories, and bounded recurring events. A malformed
+or oversized upload is rejected without replacing the current calendar. The
+management endpoints are:
+
+| Endpoint | Use |
+|---|---|
+| `POST /api/calendar/upload` | Upload an `.ics` file in the `calendar` multipart field |
+| `GET /api/calendar` | Return upload status, event count, and update time |
+| `DELETE /api/calendar` | Remove the uploaded calendar and return to configured/demo events |
+
+The E1002 continues to download the unchanged `/epaper-e1002.png` endpoint.
+The server invalidates its image cache after a successful upload; the physical
+panel updates on its next ESPHome wake cycle, which is hourly in the example
+configuration.
+
+The upload endpoint is intended for a trusted home network and has no built-in
+authentication. Do not expose it directly to the public internet.
 
 ## Architecture
 
@@ -172,9 +204,11 @@ ruuvi_reader.py       Background BLE scan thread (or demo mode)
 electricity.py         Fetches/caches spot-hinta.fi prices
 buses.py               Fetches/caches Digitransit departures
 weather.py             Fetches/caches Open-Meteo forecast
+calendar_backend.py    Parses and persists uploaded ICS calendars
+calendar_view.py       Normalizes calendar events for HTML and e-paper
 epaper.py              Renders the 800x480 e-paper dashboard image
 templates/index.html   Dashboard HTML
 static/css/style.css   Dark-theme CSS
 static/js/dashboard.js  Auto-refresh & Chart.js rendering
-esphome/               ESPHome config for the reTerminal E1001
+esphome/               ESPHome configs for the reTerminal E1001 and E1002
 ```

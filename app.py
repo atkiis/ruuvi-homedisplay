@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify, render_template, Response, request
 
 import buses
+import calendar_backend
+import calendar_view
 import config
 import electricity
 import epaper
@@ -128,18 +130,45 @@ def api_device_battery():
 # ---------------------------------------------------------------------------
 
 
-@app.route("/epaper.png")
-def epaper_png():
-    etag = epaper.get_render_etag()
+def _epaper_png_response(layout: str) -> Response:
+    etag = epaper.get_render_etag(layout)
     if request.headers.get("If-None-Match") == etag:
         return Response(status=304)
-    data = epaper.render_png()
+    data = epaper.render_png(layout)
     resp = Response(data, mimetype="image/png")
     resp.set_etag(etag)
     # Prevent stale intermediary caches from serving an older dashboard image.
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     return resp
+
+
+def _epaper_preview(layout: str, title: str, png_path: str) -> str:
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        f"<meta http-equiv='refresh' content='{config.REFRESH_INTERVAL}'>"
+        "<style>body{background:#333;margin:0;display:flex;justify-content:center;"
+        "align-items:center;min-height:100vh}"
+        "img{image-rendering:pixelated;border:1px solid #000;background:#fff}</style>"
+        "</head><body>"
+        f"<img src='{png_path}?t=0' width='{config.EPAPER_WIDTH}' "
+        f"height='{config.EPAPER_HEIGHT}'>"
+        "<script>setInterval(()=>{const i=document.querySelector('img');"
+        f"i.src='{png_path}?t='+Date.now();}},"
+        f"{config.REFRESH_INTERVAL * 1000});</script>"
+        "</body></html>"
+    )
+
+
+@app.route("/epaper.png")
+def epaper_png():
+    return _epaper_png_response("e1001")
+
+
+@app.route("/epaper-e1002.png")
+def epaper_e1002_png():
+    return _epaper_png_response("e1002")
 
 
 @app.route("/epaper/etag")
@@ -149,32 +178,78 @@ def epaper_etag():
     The e-paper device polls this cheaply to decide whether a full image
     download (and panel refresh) is actually needed.
     """
-    return Response(epaper.get_render_etag(), mimetype="text/plain")
+    return Response(epaper.get_render_etag("e1001"), mimetype="text/plain")
+
+
+@app.route("/epaper-e1002/etag")
+def epaper_e1002_etag():
+    return Response(epaper.get_render_etag("e1002"), mimetype="text/plain")
 
 
 @app.route("/epaper.bmp")
 def epaper_bmp():
-    return Response(epaper.render_bmp(mono=not config.EPAPER_COLOR), mimetype="image/bmp")
+    return Response(epaper.render_bmp(mono=not config.EPAPER_COLOR, layout="e1001"), mimetype="image/bmp")
+
+
+@app.route("/epaper-e1002.bmp")
+def epaper_e1002_bmp():
+    return Response(epaper.render_bmp(mono=False, layout="e1002"), mimetype="image/bmp")
 
 
 @app.route("/epaper")
 def epaper_preview():
     """Simple HTML wrapper to preview the landscape e-paper image in a desktop browser."""
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        "<title>E-paper preview</title>"
-        f"<meta http-equiv='refresh' content='{config.REFRESH_INTERVAL}'>"
-        "<style>body{background:#333;margin:0;display:flex;justify-content:center;"
-        "align-items:center;min-height:100vh}"
-        "img{image-rendering:pixelated;border:1px solid #000;background:#fff}</style>"
-        "</head><body>"
-        f"<img src='/epaper.png?t={{}}' width='{config.EPAPER_WIDTH}' "
-        f"height='{config.EPAPER_HEIGHT}'>"
-        "<script>setInterval(()=>{const i=document.querySelector('img');"
-        "i.src='/epaper.png?t='+Date.now();},"
-        f"{config.REFRESH_INTERVAL * 1000});</script>"
-        "</body></html>"
+    return _epaper_preview("e1001", "E-paper preview", "/epaper.png")
+
+
+# ---------------------------------------------------------------------------
+# E1002 colour calendar view (7.3" 7-colour panel, 800x480)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/epaper-e1002")
+def epaper_e1002_calendar():
+    """Self-contained 800x480 HTML/CSS calendar view for the 7.3" colour panel.
+
+    The panel itself consumes the identical layout as a PNG from
+    /epaper-e1002.png; this route is the browser preview of it.
+    """
+    return render_template(
+        "epaper_e1002_calendar.html",
+        summary=calendar_view.summary(),
+        sections=calendar_view.sections(),
+        updated=datetime.now().strftime("%H:%M"),
+        calendar_status=calendar_backend.status(),
     )
+
+
+@app.route("/api/calendar", methods=["GET", "DELETE"])
+def api_calendar():
+    if request.method == "DELETE":
+        calendar_backend.clear()
+        epaper.invalidate_render_cache()
+        return jsonify({"uploaded": False, "event_count": 0})
+    return jsonify(calendar_backend.status())
+
+
+@app.route("/api/calendar/upload", methods=["POST"])
+def api_calendar_upload():
+    upload = request.files.get("calendar")
+    max_bytes = int(getattr(config, "CALENDAR_MAX_UPLOAD_BYTES", 1024 * 1024))
+    if upload is None or not upload.filename:
+        return jsonify({"error": "Choose an .ics calendar file."}), 400
+    if not upload.filename.lower().endswith(".ics"):
+        return jsonify({"error": "Upload an iCalendar file with an .ics extension."}), 400
+    raw = upload.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        return jsonify({"error": "The calendar file is too large."}), 413
+    try:
+        events = calendar_backend.import_ics(raw)
+    except calendar_backend.CalendarImportError as exc:
+        return jsonify({"error": str(exc)}), 400
+    epaper.invalidate_render_cache()
+    return jsonify({"uploaded": True, "event_count": len(events)}), 201
+
 
 
 # ---------------------------------------------------------------------------

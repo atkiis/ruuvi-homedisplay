@@ -12,6 +12,7 @@ the upstream service.
 import logging
 import threading
 import time
+from multiprocessing import parent_process
 from zoneinfo import ZoneInfo
 
 import requests
@@ -115,8 +116,9 @@ def get_weather() -> dict:
     """
     Return a dict with:
         location – display name
-        current  – {temperature, humidity, wind, code, text} or None
+        current  – {temperature, feels_like, humidity, wind, code, text} or None
         hourly   – list of {time, hour, code, text, temperature, precip_prob} for the next hours
+        daily    – {sunrise, sunset, temp_min, temp_max, precip_prob_max, precip_sum} or None
         error    – present only if the fetch failed and no cache exists
 
     Always returns cached data instantly. On a cold cache it performs one
@@ -136,6 +138,9 @@ def get_weather() -> dict:
 
 def start() -> None:
     """Start a daemon thread that keeps the weather cache warm in the background."""
+    if parent_process() is not None:
+        logger.debug("Weather refresher skipped in multiprocessing child process.")
+        return
     def _loop() -> None:
         while True:
             _refresh()
@@ -155,8 +160,9 @@ def _refresh() -> None:
         params = {
             "latitude": config.WEATHER_LAT,
             "longitude": config.WEATHER_LON,
-            "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+            "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
             "hourly": "weather_code,temperature_2m,precipitation_probability",
+            "daily": "sunrise,sunset,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum",
             "timezone": "Europe/Helsinki",
             "forecast_days": 2,
         }
@@ -185,6 +191,7 @@ def _parse(raw: dict) -> dict:
     code = cur.get("weather_code")
     current = {
         "temperature": cur.get("temperature_2m"),
+        "feels_like": cur.get("apparent_temperature"),
         "humidity": cur.get("relative_humidity_2m"),
         "wind": cur.get("wind_speed_10m"),
         "code": code,
@@ -224,4 +231,16 @@ def _parse(raw: dict) -> dict:
         if len(hourly) >= _HOURLY_COUNT:
             break
 
-    return {"location": config.WEATHER_NAME, "current": current, "hourly": hourly}
+    daily = None
+    d = raw.get("daily") or {}
+    if d:
+        daily = {
+            "sunrise": d.get("sunrise", [None])[0] if d.get("sunrise") else None,
+            "sunset": d.get("sunset", [None])[0] if d.get("sunset") else None,
+            "temp_min": d.get("temperature_2m_min", [None])[0] if d.get("temperature_2m_min") else None,
+            "temp_max": d.get("temperature_2m_max", [None])[0] if d.get("temperature_2m_max") else None,
+            "precip_prob_max": d.get("precipitation_probability_max", [None])[0] if d.get("precipitation_probability_max") else None,
+            "precip_sum": d.get("precipitation_sum", [None])[0] if d.get("precipitation_sum") else None,
+        }
+
+    return {"location": config.WEATHER_NAME, "current": current, "hourly": hourly, "daily": daily}

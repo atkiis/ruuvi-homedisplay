@@ -11,6 +11,7 @@ import asyncio
 import logging
 import math
 import random
+from multiprocessing import parent_process
 import threading
 import time
 from datetime import datetime, timezone
@@ -39,6 +40,9 @@ _demo_loyly_next: dict[str, float] = {}    # MAC → monotonic time of next even
 
 def start() -> None:
     """Kick off the background reader thread (call once at app start-up)."""
+    if parent_process() is not None:
+        logger.debug("Ruuvi reader startup skipped in multiprocessing child process.")
+        return
     if config.DEMO_MODE:
         logger.info("Ruuvi reader: DEMO MODE enabled – using simulated data.")
         t = threading.Thread(target=_demo_loop, daemon=True, name="ruuvi-demo")

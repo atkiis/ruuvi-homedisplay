@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>E1002 calendar – 800x480</title>
+<style>
+  /* 7.3" 7-colour e-Paper (Spectra ACeP). Colours are picked close to the
+     panel's native primaries so dithering lands on a flat, solid fill. */
+  :root {
+    --ink:    #000000;
+    --paper:  #ffffff;
+    --slate:  #a9b2bd;
+    --muted:  #6a7482;
+    --red:    #d00000;
+    --green:  #009028;
+    --blue:   #0030a8;
+    --yellow: #f0c000;
+    /* Row tints sit on the slate backdrop as light cards; still pale enough
+       that the panel dithers them to a calm wash under black text. */
+    --red-bg:    #fbe9e7;
+    --green-bg:  #e6f4ea;
+    --blue-bg:   #e8edfa;
+    --yellow-bg: #fcf3da;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--slate);
+    color: var(--ink);
+    font-family: Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .screen {
+    width: 800px;
+    height: 480px;
+    overflow: hidden;
+    background: var(--slate);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Top bar: electricity summary ─────────────────────────────────────── */
+  .topbar {
+    flex: 0 0 62px;
+    display: flex;
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .metric {
+    position: relative;
+    flex: 1 1 0;
+    padding: 10px 22px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .metric + .metric::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 14px;
+    bottom: 14px;
+    width: 1px;
+    background: var(--paper);
+  }
+
+  .metric .label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+
+  .metric .line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .metric .value {
+    font-size: 27px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+  }
+
+  .metric .value .unit {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+
+  .metric .range {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  /* On the black bar pure red reads almost as dark as the background, so the
+     peak value uses yellow text plus a red chip to keep the semantic cue. */
+  .value.peak  { color: var(--yellow); }
+  .value.cheap { color: var(--green); }
+
+  .metric .chip {
+    position: absolute;
+    top: 12px;
+    right: 18px;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  .chip.peak  { background: var(--red); }
+  .chip.cheap { background: var(--green); }
+
+  /* ── Body: calendar ───────────────────────────────────────────────────── */
+  .body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 8px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .section {
+    min-height: 0;
+    overflow: hidden;
+    background: var(--paper);
+    border-radius: 10px;
+    padding: 8px 14px 6px;
+  }
+
+  .section.today { flex: 0 0 auto; }
+  .section.next  { flex: 1 1 auto; }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 5px;
+    margin-bottom: 6px;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .section-head h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+  }
+
+  .section-head .date {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--blue);
+  }
+
+  .section-head .count {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .event {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 42px;
+    margin-bottom: 5px;
+    padding: 0 12px 0 0;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .event.red    { background: var(--red-bg); }
+  .event.green  { background: var(--green-bg); }
+  .event.blue   { background: var(--blue-bg); }
+  .event.yellow { background: var(--yellow-bg); }
+
+  .event:last-child { margin-bottom: 0; }
+
+  /* The colour bar is flush with the card edge so the tint and the category
+     accent read as one object. */
+  .event .badge {
+    width: 7px;
+    height: 42px;
+    border-radius: 0;
+    margin-right: 2px;
+  }
+
+  .badge {
+    flex: none;
+    display: inline-block;
+    border-radius: 3px;
+  }
+  .badge.red    { background: var(--red); }
+  .badge.green  { background: var(--green); }
+  .badge.blue   { background: var(--blue); }
+  .badge.yellow { background: var(--yellow); }
+
+  .event .time {
+    flex: 0 0 130px;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+
+  .event .time .to {
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  .event .title {
+    flex: 1 1 auto;
+    font-size: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .empty {
+    margin: 0;
+    padding: 10px 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--muted);
+  }
+
+  /* ── Footer: category legend ──────────────────────────────────────────── */
+  .legend {
+    flex: 0 0 34px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 0 26px;
+    background: var(--blue);
+    color: var(--paper);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  .legend span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* The blue chip would vanish against the blue bar, so every legend chip
+     gets a white keyline. */
+  .legend .badge {
+    width: 12px;
+    height: 12px;
+    box-shadow: 0 0 0 1px var(--paper);
+  }
+
+  .legend .updated {
+    margin-left: auto;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<form id="calendar-upload" enctype="multipart/form-data" style="position:fixed;left:12px;bottom:12px;z-index:2;background:#fff;padding:8px;border:1px solid #000;font:14px sans-serif">
+  <label for="calendar-file">Calendar (.ics)</label>
+  <input id="calendar-file" name="calendar" type="file" accept=".ics,text/calendar" required>
+  <button type="submit">Upload</button>
+  <button id="calendar-clear" type="button">Clear</button>
+  <span id="calendar-status">{{ calendar_status.event_count }} imported events</span>
+</form>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="metric">
+      <span class="label">Average</span>
+      <span class="line">
+        <span class="value">{{ summary.average }}<span class="unit"> {{ summary.unit }}</span></span>
+      </span>
+    </div>
+    <div class="metric">
+      <i class="chip peak"></i>
+      <span class="label">Peak</span>
+      <span class="line">
+        <span class="value peak">{{ summary.peak.price }}<span class="unit"> c</span></span>
+        <span class="range">{{ summary.peak.start }}–{{ summary.peak.end }}</span>
+      </span>
+    </div>
+    <div class="metric">
+      <i class="chip cheap"></i>
+      <span class="label">Cheapest</span>
+      <span class="line">
+        <span class="value cheap">{{ summary.cheapest.price }}<span class="unit"> c</span></span>
+        <span class="range">{{ summary.cheapest.start }}–{{ summary.cheapest.end }}</span>
+      </span>
+    </div>
+  </header>
+
+  <main class="body">
+    {% for section in sections %}
+    <section class="section {{ 'today' if loop.first else 'next' }}">
+      <div class="section-head">
+        <h2>{{ section.title }}</h2>
+        <span class="date">{{ section.date }}</span>
+        <span class="count">{{ section.events|length }} events</span>
+      </div>
+      {% for event in section.events %}
+      <div class="event {{ event.category }}">
+        <i class="badge {{ event.category }}"></i>
+        <span class="time">{{ event.start }} <span class="to">– {{ event.end }}</span></span>
+        <span class="title">{{ event.title }}</span>
+      </div>
+      {% else %}
+      <p class="empty">Nothing scheduled</p>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </main>
+
+  <footer class="legend">
+    <span><i class="badge red"></i>Priority</span>
+    <span><i class="badge green"></i>Personal</span>
+    <span><i class="badge blue"></i>Work</span>
+    <span><i class="badge yellow"></i>Health</span>
+    <span class="updated">Updated {{ updated }}</span>
+  </footer>
+
+</div>
+<script>
+  const form = document.getElementById('calendar-upload');
+  const status = document.getElementById('calendar-status');
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    status.textContent = 'Uploading...';
+    const response = await fetch('/api/calendar/upload', {method: 'POST', body: new FormData(form)});
+    const data = await response.json();
+    status.textContent = data.error || `${data.event_count} imported events`;
+    if (response.ok) window.location.reload();
+  });
+  document.getElementById('calendar-clear').addEventListener('click', async () => {
+    const response = await fetch('/api/calendar', {method: 'DELETE'});
+    if (response.ok) window.location.reload();
+  });
+</script>
+</body>
+</html>
