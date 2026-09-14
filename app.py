@@ -220,7 +220,20 @@ def epaper_e1002_calendar():
         sections=calendar_view.display_sections(),
         updated=datetime.now().strftime("%H:%M"),
         calendar_status=calendar_backend.status(),
+        calendar_categories=calendar_backend.categories(),
     )
+
+
+@app.route("/api/calendar/categories", methods=["GET", "POST"])
+def api_calendar_categories():
+    if request.method == "GET":
+        return jsonify(calendar_backend.categories())
+    payload = request.get_json(silent=True) or {}
+    try:
+        key, category = calendar_backend.add_category(payload.get("label"), payload.get("palette"))
+    except calendar_backend.CalendarImportError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"key": key, **category}), 201
 
 
 @app.route("/api/calendar", methods=["GET", "DELETE"])
@@ -236,7 +249,7 @@ def api_calendar():
 def api_calendar_upload():
     upload = request.files.get("calendar")
     category = request.form.get("category", "").strip().lower()
-    valid_categories = getattr(config, "CALENDAR_CATEGORY_COLORS", {})
+    valid_categories = calendar_backend.categories()
     max_bytes = int(getattr(config, "CALENDAR_MAX_UPLOAD_BYTES", 1024 * 1024))
     if upload is None or not upload.filename:
         return jsonify({"error": "Choose an .ics calendar file."}), 400

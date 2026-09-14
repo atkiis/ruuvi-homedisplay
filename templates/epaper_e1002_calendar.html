@@ -297,11 +297,11 @@
   <label for="calendar-category">Category</label>
   <select id="calendar-category" name="category" required>
     <option value="" selected disabled>Choose</option>
-    <option value="red">Priority</option>
-    <option value="green">Personal</option>
-    <option value="blue">Work</option>
-    <option value="yellow">Health</option>
+    {% for key, category in calendar_categories.items() %}
+    <option value="{{ key }}">{{ category.label }}</option>
+    {% endfor %}
   </select>
+  <button id="calendar-add-category" type="button">Add category</button>
   <button type="submit">Upload</button>
   <button id="calendar-clear" type="button">Clear</button>
   <span id="calendar-status">{{ calendar_status.event_count }} imported events</span>
@@ -366,6 +366,26 @@
 <script>
   const form = document.getElementById('calendar-upload');
   const status = document.getElementById('calendar-status');
+  document.getElementById('calendar-add-category').addEventListener('click', async () => {
+    const label = window.prompt('New category name');
+    if (!label) return;
+    const palette = window.prompt('Color: red, green, blue, or yellow', 'blue');
+    if (!palette) return;
+    const response = await fetch('/api/calendar/categories', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({label, palette})
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      status.textContent = data.error || 'Could not add category';
+      return;
+    }
+    document.getElementById('calendar-category').add(
+      new Option(data.label, data.key, true, true)
+    );
+    status.textContent = `${data.label} added`;
+  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     status.textContent = 'Uploading...';

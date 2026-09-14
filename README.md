@@ -197,6 +197,12 @@ so one calendar feed can be assigned to Priority, Personal, Work, or Health
 without editing the source calendar. Embedded ICS categories are used only
 when importing through the backend directly without an upload override.
 
+Additional E1002 categories can be added from the calendar preview. Each new
+category is assigned one of the panel's existing red, green, blue, or yellow
+pigments and is stored in `instance/calendar_categories.json`. This keeps the
+color e-paper output predictable while allowing named categories such as
+Family, Travel, or School. These settings apply only to E1002 calendar events.
+
 The E1002 calendar layout adapts to the agenda: five or more events today use
 the full display in a denser layout, while an empty today promotes tomorrow's
 events into a larger single-day layout. Normal agendas show both days. Event

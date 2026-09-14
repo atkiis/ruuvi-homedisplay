@@ -1,7 +1,9 @@
 import io
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import calendar_backend
 from app import app
 
 
@@ -49,6 +51,21 @@ class CalendarRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("category", response.get_json()["error"])
+
+    def test_add_category(self):
+        with TemporaryDirectory() as directory, patch.object(
+            calendar_backend.config,
+            "CALENDAR_STORAGE_PATH",
+            f"{directory}/calendar.json",
+        ):
+            response = self.client.post(
+                "/api/calendar/categories",
+                json={"label": "Family", "palette": "yellow"},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.get_json()["label"], "Family")
+        self.assertEqual(response.get_json()["palette"], "yellow")
 
     def test_upload_rejects_missing_file(self):
         response = self.client.post("/api/calendar/upload")

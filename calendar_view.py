@@ -29,8 +29,7 @@ def summary() -> dict:
 
 
 def _category(raw) -> str:
-    category = str(raw or "").lower()
-    return category if category in config.CALENDAR_CATEGORY_COLORS else "blue"
+    return calendar_backend.category_palette(raw)
 
 
 def sections() -> list[dict]:

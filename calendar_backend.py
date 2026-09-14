@@ -17,6 +17,67 @@ class CalendarImportError(ValueError):
     """Raised when an uploaded calendar cannot be safely imported."""
 
 
+def _default_categories() -> dict[str, dict[str, str]]:
+    return {
+        "red": {"label": "Priority", "palette": "red"},
+        "green": {"label": "Personal", "palette": "green"},
+        "blue": {"label": "Work", "palette": "blue"},
+        "yellow": {"label": "Health", "palette": "yellow"},
+    }
+
+
+def _categories_path() -> Path:
+    return _storage_path().with_name("calendar_categories.json")
+
+
+def categories() -> dict[str, dict[str, str]]:
+    result = _default_categories()
+    try:
+        with _categories_path().open(encoding="utf-8") as stream:
+            saved = json.load(stream)
+        for key, value in saved.items():
+            if (isinstance(key, str) and isinstance(value, dict)
+                    and isinstance(value.get("label"), str)
+                    and value.get("palette") in result):
+                result[key] = {"label": value["label"], "palette": value["palette"]}
+    except (OSError, ValueError, TypeError):
+        pass
+    return result
+
+
+def category_palette(category: str | None) -> str:
+    entry = categories().get(str(category or "").lower())
+    return entry["palette"] if entry else "blue"
+
+
+def add_category(label: str, palette: str) -> tuple[str, dict[str, str]]:
+    label = " ".join(str(label or "").split()).strip()
+    palette = str(palette or "").lower().strip()
+    if not label or len(label) > 24:
+        raise CalendarImportError("Category name must be 1 to 24 characters")
+    if palette not in _default_categories():
+        raise CalendarImportError("Choose one of the available e-paper colors")
+    key = "-".join("".join(char for char in word if char.isalnum())
+                   for word in label.lower().split()).strip("-")
+    if not key:
+        raise CalendarImportError("Category name must contain letters or numbers")
+    existing = categories()
+    if key in existing:
+        raise CalendarImportError("That category already exists")
+    existing[key] = {"label": label, "palette": palette}
+    path = _categories_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as stream:
+            json.dump(existing, stream, indent=2)
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return key, existing[key]
+
+
 def _timezone() -> ZoneInfo:
     return ZoneInfo(getattr(config, "CALENDAR_TIMEZONE", "Europe/Helsinki"))
 
@@ -61,7 +122,7 @@ def _normalize_event(component, category_override: str | None = None) -> dict:
         end = start + (timedelta(days=1) if all_day else timedelta(hours=1))
 
     category = category_override or _as_text(component.get("CATEGORIES")).split(",", 1)[0].lower().strip()
-    if category not in getattr(config, "CALENDAR_CATEGORY_COLORS", {}):
+    if category not in categories():
         category = "blue"
     return {
         "time": start.isoformat(),
@@ -83,8 +144,7 @@ def parse_ics(raw: bytes, category: str | None = None) -> list[dict]:
     """Parse an ICS document and return normalized events in the display window."""
     if not isinstance(raw, bytes) or not raw.strip():
         raise CalendarImportError("The uploaded calendar file is empty")
-    valid_categories = getattr(config, "CALENDAR_CATEGORY_COLORS", {})
-    if category is not None and category not in valid_categories:
+    if category is not None and category not in categories():
         raise CalendarImportError("Choose a valid calendar category")
 
     try:
