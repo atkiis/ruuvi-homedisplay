@@ -786,17 +786,23 @@ def _render_landscape() -> Image.Image:
     return img
 
 
-def _invert(img: Image.Image) -> Image.Image:
+def _invert(img: Image.Image, *, enabled: bool = True) -> Image.Image:
     """Invert black<->white when ``config.EPAPER_INVERT`` is set.
 
     Some 1-bit panels treat a set bit as white and others as black, so a PNG
     that looks correct on screen can appear with inverted colours on the panel.
     Enable EPAPER_INVERT to flip the output to match the hardware.
     """
-    if getattr(config, "EPAPER_INVERT", False):
+    if enabled and getattr(config, "EPAPER_INVERT", False):
         from PIL import ImageOps
         return ImageOps.invert(img.convert("RGB"))
     return img
+
+
+def _should_invert(layout: str) -> bool:
+    if layout.startswith("e1002"):
+        return getattr(config, "EPAPER_E1002_INVERT", False)
+    return getattr(config, "EPAPER_INVERT", False)
 
 
 # ---------------------------------------------------------------------------
@@ -816,7 +822,7 @@ def invalidate_render_cache() -> None:
         _render_cache.clear()
 
 
-def _cached_render_png(key: str, render_fn) -> tuple[str, bytes]:
+def _cached_render_png(key: str, render_fn, *, invert: bool = True) -> tuple[str, bytes]:
     """Return *(etag, png_bytes)*, pulling from cache when still fresh."""
     with _render_cache_lock:
         entry = _render_cache.get(key)
@@ -824,7 +830,7 @@ def _cached_render_png(key: str, render_fn) -> tuple[str, bytes]:
             return entry[0], entry[1]
     # Render outside the lock so long renders don't block concurrent readers.
     buf = io.BytesIO()
-    _invert(render_fn()).save(buf, format="PNG")
+    _invert(render_fn(), enabled=invert).save(buf, format="PNG")
     data = buf.getvalue()
     etag = hashlib.md5(data).hexdigest()
     with _render_cache_lock:
@@ -842,7 +848,11 @@ def get_render_etag(layout: str | None = None) -> str:
     resolved_layout = _resolve_layout(layout)
     orientation = "portrait" if getattr(config, "EPAPER_ORIENTATION", "landscape") == "portrait" else "landscape"
     key = f"{resolved_layout}:{orientation}"
-    etag, _ = _cached_render_png(key, lambda: render(resolved_layout))
+    etag, _ = _cached_render_png(
+        key,
+        lambda: render(resolved_layout),
+        invert=_should_invert(resolved_layout),
+    )
     return etag
 
 
@@ -850,13 +860,18 @@ def render_png(layout: str | None = None) -> bytes:
     resolved_layout = _resolve_layout(layout)
     orientation = "portrait" if getattr(config, "EPAPER_ORIENTATION", "landscape") == "portrait" else "landscape"
     key = f"{resolved_layout}:{orientation}"
-    _, data = _cached_render_png(key, lambda: render(resolved_layout))
+    _, data = _cached_render_png(
+        key,
+        lambda: render(resolved_layout),
+        invert=_should_invert(resolved_layout),
+    )
     return data
 
 
 def render_bmp(mono: bool = True, layout: str | None = None) -> bytes:
     """Return a BMP. ``mono`` produces a 1-bit image for bare e-ink sketches."""
-    img = _invert(render(layout))
+    resolved_layout = _resolve_layout(layout)
+    img = _invert(render(resolved_layout), enabled=_should_invert(resolved_layout))
     if mono:
         # Floyd-Steinberg dithering preserves the tonal hierarchy of grey labels
         # and icons (they dither to a lighter pattern instead of collapsing to

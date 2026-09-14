@@ -192,6 +192,10 @@ The server invalidates its image cache after a successful upload; the physical
 panel updates on its next ESPHome wake cycle, which is hourly in the example
 configuration.
 
+Image polarity is configured independently in `config.py`: `EPAPER_INVERT`
+controls E1001 and `EPAPER_E1002_INVERT` controls E1002. The defaults keep
+E1001 inverted and E1002 in its normal color presentation.
+
 The selected upload category is applied to every imported event in that file,
 so one calendar feed can be assigned to Priority, Personal, Work, or Health
 without editing the source calendar. Embedded ICS categories are used only

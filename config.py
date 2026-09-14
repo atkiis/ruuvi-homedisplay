@@ -107,10 +107,11 @@ EPAPER_ROTATE = 0         # Rotate the rendered image (0/90/180/270) if mounted 
 # Set True only for the 6-colour reTerminal E1002; adds red highlights for
 # expensive electricity hours. Leave False for the monochrome E1001.
 EPAPER_COLOR = False
-# Invert black<->white in the served image. Some panels interpret 1-bit pixels
-# with the opposite polarity, so the dashboard appears with a black background
-# even though the PNG preview looks correct. Set True to flip it.
+# E1001 only: invert black<->white when the monochrome panel needs opposite
+# pixel polarity from the preview.
 EPAPER_INVERT = True
+# E1002 only: independently invert the colour calendar image when needed.
+EPAPER_E1002_INVERT = False
 # Layout orientation: "landscape" (800x480, panel horizontal) or
 # "portrait" (480x800, panel mounted vertically).  All /epaper endpoints
 # will serve the chosen layout automatically.
