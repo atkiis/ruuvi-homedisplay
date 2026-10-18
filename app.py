@@ -21,6 +21,7 @@ import calendar_view
 import config
 import electricity
 import epaper
+import i18n
 import ruuvi_reader
 import weather
 
@@ -219,6 +220,9 @@ def epaper_e1002_calendar():
         summary=calendar_view.summary(),
         sections=calendar_view.display_sections(),
         updated=datetime.now().strftime("%H:%M"),
+        t=i18n.t,
+        event_count=i18n.event_count,
+        lang=i18n.language(),
         calendar_status=calendar_backend.status(),
         calendar_categories=calendar_backend.categories(),
     )

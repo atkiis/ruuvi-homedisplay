@@ -125,6 +125,12 @@ EPAPER_LAYOUT = "e1001"
 # panels where thin strokes are too faint to read at normal viewing distance.
 EPAPER_FORCE_BOLD = True
 
+# Language of the E1002 views: "fi" (default) or "en".
+EPAPER_LANGUAGE = "fi"
+
+# Snap the E1002 image to the panel's 6 pigments (no off-palette colours).
+EPAPER_E1002_SNAP = True
+
 # Optional calendar feed for the E1002 layout. Add items as:
 #   {"time": "2026-07-06T18:30:00+03:00", "title": "Dentist"}
 # Optional extra keys used by the 7.3" colour calendar view (/epaper-e1002):
@@ -138,6 +144,9 @@ CALENDAR_STORAGE_PATH = "instance/calendar.json"
 CALENDAR_TIMEZONE = "Europe/Helsinki"
 CALENDAR_MAX_UPLOAD_BYTES = 1024 * 1024
 CALENDAR_LOOKAHEAD_DAYS = 7
+# Keep an event visible for this long after its scheduled end so the hourly
+# e-paper refresh does not remove it immediately at the end time.
+CALENDAR_EVENT_RETENTION_HOURS = 1
 
 # Fallback agenda shown on the colour calendar view while CALENDAR_EVENTS is
 # empty. "day" is either "today" or "tomorrow".

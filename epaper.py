@@ -34,6 +34,8 @@ from PIL import Image, ImageDraw, ImageFont
 import buses
 import calendar_view
 import config
+import epaper_palette
+import i18n
 import electricity
 import ruuvi_reader
 import weather
@@ -823,7 +825,12 @@ def invalidate_render_cache() -> None:
 
 
 def _cached_render_png(key: str, render_fn, *, invert: bool = True) -> tuple[str, bytes]:
-    """Return *(etag, png_bytes)*, pulling from cache when still fresh."""
+    """Return *(etag, png_bytes)*, pulling from cache when still fresh.
+
+    The Helsinki hour is part of the key so the first request after a full hour
+    never gets the previous hour's image (the device wakes just after :00).
+    """
+    key = f"{key}:{datetime.now(tz=_HELSINKI):%Y%m%d%H}"
     with _render_cache_lock:
         entry = _render_cache.get(key)
         if entry and (time.monotonic() - entry[2]) < _RENDER_CACHE_TTL:
@@ -1584,6 +1591,7 @@ _CAL_TINT = {
     "yellow": (252, 243, 218),
 }
 
+_CAL_BG = epaper_palette.BLUE  # solid page colour; the panel cannot show flat greys
 _CAL_TOP_H = 62
 _CAL_FOOT_H = 34
 _CAL_ROW_H = 42
@@ -1607,40 +1615,47 @@ def _cal_tracked(draw, xy, text, size, spacing, *, bold=True, fill=_CAL_INK):
     return x
 
 
-def _cal_draw_topbar(draw, w, summary):
+def _price_level(price) -> tuple:
+    """Panel colour for a c/kWh price: green cheap, yellow normal, red expensive."""
+    if price is None:
+        return epaper_palette.BLACK
+    if price >= ELEC_EXPENSIVE_THRESHOLD:
+        return epaper_palette.RED
+    if price >= ELEC_CHEAP_THRESHOLD:
+        return epaper_palette.YELLOW
+    return epaper_palette.GREEN
+
+
+def _cal_draw_topbar(draw, w, now, wx, current_price):
+    """Black bar: date, outdoor temperature, and the price for the current hour."""
     draw.rectangle([0, 0, w, _CAL_TOP_H], fill=_CAL_INK)
-    col_w = w / 3
-    unit = summary.get("unit", "c/kWh")
-    peak = summary.get("peak") or {}
-    cheap = summary.get("cheapest") or {}
-    columns = [
-        ("AVERAGE", f"{summary.get('average')}", f" {unit}", _CAL_PAPER, "", None),
-        ("PEAK", f"{peak.get('price')}", " c",
-         _CAL_ACCENT["yellow"], f"{peak.get('start')}–{peak.get('end')}", _CAL_ACCENT["red"]),
-        ("CHEAPEST", f"{cheap.get('price')}", " c",
-         _CAL_ACCENT["green"], f"{cheap.get('start')}–{cheap.get('end')}", _CAL_ACCENT["green"]),
-    ]
-
-    for i, (label, value, value_unit, value_fill, range_text, chip) in enumerate(columns):
-        x = int(i * col_w) + 22
-        if i:
-            sep = int(i * col_w)
-            draw.line([(sep, 14), (sep, _CAL_TOP_H - 14)], fill=_CAL_PAPER, width=1)
-        _cal_tracked(draw, (x, 12), label, 11, 2.5, fill=_CAL_PAPER)
-        baseline = 48
-        value_x = x + _font(27, True).getlength(value)
-        _cal_text(draw, (x, baseline), value, 27, bold=True, fill=value_fill, anchor="ls")
-        _cal_text(draw, (value_x, baseline), value_unit, 14, bold=True, fill=value_fill, anchor="ls")
-        if range_text:
-            unit_w = _font(14, True).getlength(value_unit)
-            _cal_text(draw, (value_x + unit_w + 10, baseline), range_text, 13,
-                      bold=False, fill=_CAL_PAPER, anchor="ls")
-        if chip:
-            cx = int((i + 1) * col_w) - 18
-            draw.rounded_rectangle([cx, 12, cx + 10, 22], radius=2, fill=chip)
+    mid = _CAL_TOP_H / 2
+    _cal_text(draw, (22, mid + 1), i18n.short_date(now.date()), 28, bold=True,
+              fill=_CAL_PAPER, anchor="lm")
+    cur = wx.get("current") or {}
+    temp = cur.get("temperature")
+    temp_text = f"{temp:.0f}°" if temp is not None else "--"
+    x = 300
+    _cal_text(draw, (x, mid + 1), temp_text, 30, bold=True, fill=_CAL_PAPER, anchor="lm")
+    _cal_text(draw, (x + _text_width(temp_text, 30, True) + 10, mid + 1),
+              _fit(str(cur.get("text") or ""), 15, 150), 15, fill=_CAL_PAPER, anchor="lm")
+    hour = now.hour
+    label = f"{hour:02d}–{(hour + 1) % 24:02d}"
+    price_text = f"{current_price:.1f}" if current_price is not None else "--"
+    right = w - 22
+    _cal_text(draw, (right, mid + 4), " c/kWh", 14, bold=True, fill=_CAL_PAPER, anchor="rs")
+    unit_w = _text_width(" c/kWh", 14, True)
+    _cal_text(draw, (right - unit_w, mid + 5), price_text, 30, bold=True,
+              fill=_CAL_PAPER, anchor="rs")
+    value_w = _text_width(price_text, 30, True)
+    chip_x = right - unit_w - value_w - 26
+    draw.rounded_rectangle([chip_x, mid - 12, chip_x + 18, mid + 6], radius=3,
+                           fill=_price_level(current_price), outline=_CAL_PAPER, width=1)
+    _cal_tracked(draw, (chip_x - 8 - _text_width(label, 12, True) - 1.0 * len(label), mid - 8),
+                 label, 12, 1.0, fill=_CAL_PAPER)
 
 
-def _cal_draw_section(draw, x, y, w, h, section):
+def _cal_draw_section(img, draw, x, y, w, h, section):
     layout = section.get("layout", "normal")
     row_h = {"dense": 34, "expanded": 50, "normal": _CAL_ROW_H}.get(layout, _CAL_ROW_H)
     row_gap = 3 if layout == "dense" else _CAL_ROW_GAP
@@ -1654,24 +1669,27 @@ def _cal_draw_section(draw, x, y, w, h, section):
     end_x = _cal_tracked(draw, (inner_x, head_baseline), section["title"].upper(), 16, 4)
     _cal_text(draw, (end_x + 10, head_baseline + 3), section["date"], 13,
               bold=True, fill=_CAL_ACCENT["blue"])
-    count = f"{len(section['events'])} EVENTS"
+    count = i18n.event_count(len(section["events"])).upper()
     _cal_tracked(draw, (x + w - 14 - _text_width(count, 11, True) - 1.5 * len(count),
-                        head_baseline + 4), count, 11, 1.5, fill=_CAL_MUTED)
+                        head_baseline + 4), count, 11, 1.5, fill=_CAL_INK)
     rule_y = y + _CAL_HEAD_H
     draw.rectangle([inner_x, rule_y, inner_x + inner_w, rule_y + 1], fill=_CAL_INK)
 
     row_y = rule_y + 7
     if not section["events"]:
-        _cal_text(draw, (inner_x, row_y + 6), "Nothing scheduled", 16,
-                  bold=True, fill=_CAL_MUTED)
+        _cal_text(draw, (inner_x, row_y + 6), i18n.t("nothing"), 16,
+                  bold=True, fill=_CAL_INK)
         return
 
     for event in section["events"]:
         if row_y + row_h > y + h:
             break
         category = event.get("category", "blue")
+        accent = _CAL_ACCENT.get(category, _CAL_ACCENT["blue"])
+        # Pigment-native card: white with an accent outline (pastel tints would
+        # dither into noise behind the text on the real panel).
         draw.rounded_rectangle([inner_x, row_y, inner_x + inner_w, row_y + row_h],
-                               radius=6, fill=_CAL_TINT.get(category, _CAL_TINT["blue"]))
+                               radius=6, fill=_CAL_PAPER, outline=accent, width=2)
         # Colour bar flush with the rounded card edge.
         draw.rectangle([inner_x + 3, row_y, inner_x + 10, row_y + row_h],
                        fill=_CAL_ACCENT.get(category, _CAL_ACCENT["blue"]))
@@ -1685,7 +1703,7 @@ def _cal_draw_section(draw, x, y, w, h, section):
         _cal_text(draw, (text_x, mid_y), start, time_size, bold=True, anchor="lm")
         start_w = _text_width(start, time_size, True)
         _cal_text(draw, (text_x + start_w + 5, mid_y), "→", time_size - 2,
-                  fill=_CAL_MUTED, anchor="lm")
+                  fill=_CAL_INK, anchor="lm")
         end_x = text_x + start_w + 21
         _cal_text(draw, (end_x, mid_y), end, time_size, bold=True, anchor="lm")
         title_x = text_x + (145 if layout == "expanded" else 138 if layout == "normal" else 125)
@@ -1697,11 +1715,11 @@ def _cal_draw_section(draw, x, y, w, h, section):
 
 def _cal_draw_legend(draw, w, h, updated):
     top = h - _CAL_FOOT_H
-    draw.rectangle([0, top, w, h], fill=_CAL_ACCENT["blue"])
+    draw.rectangle([0, top, w, h], fill=_CAL_INK)
     mid_y = top + _CAL_FOOT_H / 2
     x = 26
-    for category, label in (("red", "PRIORITY"), ("green", "PERSONAL"),
-                            ("blue", "WORK"), ("yellow", "HEALTH")):
+    for category in ("red", "green", "blue", "yellow"):
+        label = i18n.t(category).upper()
         chip = [x, mid_y - 6, x + 12, mid_y + 6]
         # The blue chip would vanish on the blue bar, so every chip gets a keyline.
         draw.rounded_rectangle(chip, radius=3, fill=_CAL_ACCENT[category],
@@ -1709,37 +1727,182 @@ def _cal_draw_legend(draw, w, h, updated):
         x += 20
         x = _cal_tracked(draw, (x, mid_y - 7), label, 12, 1.5, fill=_CAL_PAPER) + 24
 
-    stamp = f"UPDATED {updated}"
+    stamp = f"{i18n.t('updated').upper()} {updated}"
     stamp_w = _text_width(stamp, 12, True) + 1.5 * len(stamp)
     _cal_tracked(draw, (w - 26 - stamp_w, mid_y - 7), stamp, 12, 1.5, fill=_CAL_PAPER)
 
 
+def _card(draw, x, y, w, h):
+    draw.rounded_rectangle([x, y, x + w, y + h], radius=10, fill=_CAL_PAPER)
+
+
+def _card_title(draw, x, y, text, color=_CAL_INK):
+    return _cal_tracked(draw, (x, y), text.upper(), 14, 3, fill=color)
+
+
+def _draw_weather_card(draw, x, y, w, h, wx, now):
+    _card(draw, x, y, w, h)
+    ix, iw = x + 14, w - 28
+    _card_title(draw, ix, y + 8, i18n.t("weather"))
+    draw.rectangle([ix, y + 8 + 18, ix + iw, y + 8 + 19], fill=_CAL_INK)
+    cur = wx.get("current") or {}
+    temp = cur.get("temperature")
+    top = y + 34
+    _draw_weather_icon(draw, cur.get("icon", "cloud"), ix - 2, top, 46)
+    _cal_text(draw, (ix + 52, top + 22),
+              f"{temp:.0f}°" if temp is not None else "--", 38, bold=True, anchor="lm")
+    feels = cur.get("feels_like")
+    wind = cur.get("wind")
+    lines = []
+    if feels is not None:
+        lines.append(f"{i18n.t('feels_like')} {feels:.0f}°")
+    if wind is not None:
+        lines.append(f"{wind:.0f} m/s")
+    for i, line in enumerate(lines):
+        _cal_text(draw, (x + w - 14, top + 8 + i * 20), line, 15, bold=True, anchor="ra")
+
+    # 12-hour strip: temperature line over precipitation-probability bars.
+    hourly = [h_ for h_ in (wx.get("hourly") or [])
+              if str(h_.get("time", "")) >= now.strftime("%Y-%m-%dT%H:00")][:12]
+    temps = [h_["temperature"] for h_ in hourly if h_.get("temperature") is not None]
+    cx0, cx1 = ix, ix + iw
+    cy0, cy1 = top + 62, y + h - 24
+    if len(temps) < 2:
+        return
+    lo, hi = min(temps), max(temps)
+    span = max(hi - lo, 1.0)
+    step = (cx1 - cx0) / (len(hourly) - 1)
+    bar_w = max(int(step) - 4, 6)
+    points = []
+    for i, h_ in enumerate(hourly):
+        px = cx0 + i * step
+        pop = h_.get("precip_prob") or 0
+        if pop >= 30:
+            bh = int((cy1 - cy0) * 0.45 * min(pop, 100) / 100)
+            draw.rectangle([px - bar_w / 2, cy1 - bh, px + bar_w / 2, cy1],
+                           fill=epaper_palette.BLUE)
+        t_ = h_.get("temperature")
+        if t_ is not None:
+            points.append((px, cy1 - 8 - (t_ - lo) / span * (cy1 - cy0 - 20)))
+    draw.line(points, fill=epaper_palette.RED, width=3)
+    for i, (px, py) in enumerate(points):
+        if i in (0, len(points) // 2, len(points) - 1) or hourly[i]["temperature"] in (lo, hi):
+            draw.ellipse([px - 3, py - 3, px + 3, py + 3], fill=_CAL_INK)
+    _cal_text(draw, (cx0, cy0 - 6), f"{hi:.0f}°", 12, bold=True, anchor="lb")
+    _cal_text(draw, (cx0, cy1 - 2), f"{lo:.0f}°", 12, bold=True, anchor="lb")
+    for i, h_ in enumerate(hourly):
+        if i % 3 == 0:
+            _cal_text(draw, (cx0 + i * step, y + h - 8), f"{h_['hour']:02d}", 12,
+                      bold=True, anchor="mb")
+
+
+def _cheapest_window(hours, length=3):
+    best = None
+    for i in range(len(hours) - length + 1):
+        total = sum(float(h_["price_with_tax"]) for h_ in hours[i:i + length])
+        if best is None or total < best[0]:
+            best = (total, i)
+    if best is None:
+        return None
+    first = hours[best[1]]["hour"]
+    return first, (hours[best[1] + length - 1]["hour"] + 1) % 24, best[0] / length
+
+
+def _draw_price_card(draw, x, y, w, h, prices, now, summary):
+    _card(draw, x, y, w, h)
+    ix, iw = x + 14, w - 28
+    _card_title(draw, ix, y + 8, i18n.t("price"))
+    draw.rectangle([ix, y + 8 + 18, ix + iw, y + 8 + 19], fill=_CAL_INK)
+    hours = [h_ for h_ in (prices.get("hours") or [])]
+    quarters = prices.get("quarters") or []
+    bars = quarters if len(quarters) >= 48 else hours
+    if not bars:
+        _cal_text(draw, (ix, y + 50), i18n.t("no_data"), 16, bold=True)
+        return
+    values = [float(b["price_with_tax"]) for b in bars]
+    top = y + 40
+    chart_h = h - 40 - 62
+    bottom = top + chart_h
+    vmax = max(max(values), ELEC_EXPENSIVE_THRESHOLD)
+    n = len(bars)
+    bw = iw / n
+    for i, b in enumerate(bars):
+        v = float(b["price_with_tax"])
+        bh = max(2, int(max(v, 0) / vmax * chart_h))
+        bx0 = ix + i * bw
+        is_now = b["hour"] == now.hour
+        draw.rectangle([bx0, bottom - bh, bx0 + max(bw - 1, 1), bottom],
+                       fill=_price_level(v))
+        if is_now:
+            draw.rectangle([bx0 - 0.5, bottom - bh - 1, bx0 + bw - 0.5, bottom],
+                           outline=_CAL_INK, width=1)
+    draw.line([(ix, bottom + 1), (ix + iw, bottom + 1)], fill=_CAL_INK, width=2)
+    # Marker for the current hour above the bars, hour labels below.
+    per_hour = n / 24 if n >= 48 else 1
+    now_x = ix + (now.hour * per_hour) * bw + per_hour * bw / 2
+    draw.polygon([(now_x - 5, top - 6), (now_x + 5, top - 6), (now_x, top + 1)], fill=_CAL_INK)
+    for hour in (0, 6, 12, 18):
+        _cal_text(draw, (ix + hour * per_hour * bw, bottom + 4), f"{hour:02d}", 12,
+                  bold=True, anchor="la")
+    # Summary lines: cheapest 3 h window and the day's peak.
+    cheap = _cheapest_window(hours)
+    ly = y + h - 44
+    chip = 11
+    if cheap:
+        draw.rounded_rectangle([ix, ly + 2, ix + chip, ly + 2 + chip], radius=2,
+                               fill=epaper_palette.GREEN)
+        _cal_text(draw, (ix + chip + 6, ly), f"{i18n.t('cheapest')} {cheap[0]:02d}–{cheap[1]:02d}", 14,
+                  bold=True)
+        _cal_text(draw, (ix + iw, ly), f"{cheap[2]:.1f} c", 14, bold=True, anchor="ra")
+    peak = summary.get("peak") or {}
+    if peak:
+        draw.rounded_rectangle([ix, ly + 22, ix + chip, ly + 22 + chip], radius=2,
+                               fill=epaper_palette.RED)
+        _cal_text(draw, (ix + chip + 6, ly + 20),
+                  f"{i18n.t('peak')} {peak.get('start', '')[:2]}–{peak.get('end', '')[:2]}", 14,
+                  bold=True)
+        _cal_text(draw, (ix + iw, ly + 20), f"{peak.get('price')} c", 14, bold=True, anchor="ra")
+
+
 def _render_e1002_calendar() -> Image.Image:
     w, h = 800, 480
-    img = Image.new("RGB", (w, h), _CAL_SLATE)
+    img = Image.new("RGB", (w, h), _CAL_BG)
     draw = ImageDraw.Draw(img)
 
-    _cal_draw_topbar(draw, w, calendar_view.summary())
+    now = datetime.now(tz=_HELSINKI)
+    prices = electricity.get_prices()
+    wx = weather.get_weather()
+    current_price = (prices.get("current") or {}).get("price_with_tax")
+    _cal_draw_topbar(draw, w, now, wx, current_price)
 
     sections = calendar_view.display_sections()
     body_top = _CAL_TOP_H + 8
     body_bottom = h - _CAL_FOOT_H - 8
-    sheet_x = 20
-    sheet_w = w - 40
+    gutter = 8
+    left_x, left_w = 12, 462
+    right_x = left_x + left_w + gutter
+    right_w = w - 12 - right_x
 
     if len(sections) == 1:
-        section = sections[0]
-        _cal_draw_section(draw, sheet_x, body_top, sheet_w, body_bottom - body_top, section)
+        _cal_draw_section(img, draw, left_x, body_top, left_w, body_bottom - body_top, sections[0])
     else:
         today, tomorrow = sections
         today_h = _cal_sheet_height(today)
         tomorrow_top = body_top + today_h + _CAL_SHEET_GAP
-        _cal_draw_section(draw, sheet_x, body_top, sheet_w, today_h, today)
-        _cal_draw_section(draw, sheet_x, tomorrow_top, sheet_w,
+        _cal_draw_section(img, draw, left_x, body_top, left_w, today_h, today)
+        _cal_draw_section(img, draw, left_x, tomorrow_top, left_w,
                           max(_cal_sheet_height(tomorrow), body_bottom - tomorrow_top), tomorrow)
 
-    _cal_draw_legend(draw, w, h, datetime.now(tz=_HELSINKI).strftime("%H:%M"))
+    weather_h = 170
+    _draw_weather_card(draw, right_x, body_top, right_w, weather_h, wx, now)
+    price_top = body_top + weather_h + gutter
+    _draw_price_card(draw, right_x, price_top, right_w, body_bottom - price_top,
+                     prices, now, calendar_view.summary())
 
+    _cal_draw_legend(draw, w, h, now.strftime("%H:%M"))
+
+    if getattr(config, "EPAPER_E1002_SNAP", True):
+        img = epaper_palette.snap(img)
     if config.EPAPER_ROTATE:
         img = img.rotate(config.EPAPER_ROTATE, expand=True)
     return img

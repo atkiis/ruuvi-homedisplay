@@ -182,8 +182,8 @@ def _refresh() -> None:
         logger.info("Weather refreshed for %s.", config.WEATHER_NAME)
 
 
-# Number of upcoming hourly forecast entries to expose (current hour + next 8).
-_HOURLY_COUNT = 9
+# Number of upcoming hourly forecast entries to expose (current hour + next 11).
+_HOURLY_COUNT = 12
 
 
 def _parse(raw: dict) -> dict:

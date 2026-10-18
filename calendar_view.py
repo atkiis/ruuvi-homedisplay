@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import config
 import calendar_backend
 import electricity
+import i18n
 
 # Shown when the spot-price API has not produced usable data yet.
 FALLBACK_SUMMARY = {
@@ -97,13 +98,13 @@ def sections() -> list[dict]:
 
     return [
         {
-            "title": "Today",
-            "date": today.strftime("%a %-d %b"),
+            "title": i18n.t("today"),
+            "date": i18n.short_date(today),
             "events": grouped["today"],
         },
         {
-            "title": "Tomorrow",
-            "date": (today + timedelta(days=1)).strftime("%a %-d %b"),
+            "title": i18n.t("tomorrow"),
+            "date": i18n.short_date(today + timedelta(days=1)),
             "events": grouped["tomorrow"],
         },
     ]

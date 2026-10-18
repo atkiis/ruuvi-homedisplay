@@ -135,6 +135,7 @@ def _parse(raw: list) -> dict:
     # quarter-hour values into hourly buckets and convert €/kWh → c/kWh (so the
     # colour thresholds of 5 / 12 / 20 / 30 c/kWh stay meaningful).
     buckets: dict[int, dict] = {}
+    quarters = []
     for entry in raw:
         dt_str = entry.get("DateTime", "")
         try:
@@ -145,6 +146,8 @@ def _parse(raw: list) -> dict:
             dt.hour,
             {"datetime": dt_str, "no_tax": [], "with_tax": []},
         )
+        quarters.append({"hour": dt.hour, "minute": dt.minute,
+                         "price_with_tax": round(entry.get("PriceWithTax", 0.0) * 100, 2)})
         b["no_tax"].append(entry.get("PriceNoTax", 0.0) * 100)
         b["with_tax"].append(entry.get("PriceWithTax", 0.0) * 100)
 
@@ -162,7 +165,7 @@ def _parse(raw: list) -> dict:
         )
     # Sort by hour ascending.
     hours.sort(key=lambda h: h["hour"])
-    return {"hours": hours, "current": None, "unit": "c/kWh"}
+    return {"hours": hours, "quarters": quarters, "current": None, "unit": "c/kWh"}
 
 
 def _patch_current(data: dict) -> dict:

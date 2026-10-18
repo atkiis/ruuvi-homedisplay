@@ -29,7 +29,9 @@ substitutions:
   # Safety timeout if Wi-Fi or the image download never completes.
   run_duration: "2min"
   # Approximate hourly cadence including the active boot/update period.
-  sleep_duration: "58min"
+  sleep_duration: "58min"   # fallback only (run_duration timeout); normal wake is hour-aligned
+  # Seconds after the full hour at which the device wakes.
+  wake_margin_seconds: "25"
 
 esphome:
   name: ${device_name}
@@ -58,8 +60,7 @@ esphome:
                   level: ERROR
                   format: "WiFi still not connected - sleeping until next cycle"
               - output.turn_off: battery_measure_enable
-              - deep_sleep.enter:
-                  id: deep_sleep_1
+              - script.execute: sleep_to_next_hour
 
 esp32:
   variant: esp32s3
@@ -162,9 +163,8 @@ online_image:
       - component.update: epaper
       - delay: 15s
       - output.turn_off: battery_measure_enable
-      - logger.log: "E-paper update complete - sleeping until next cycle"
-      - deep_sleep.enter:
-          id: deep_sleep_1
+      - logger.log: "E-paper update complete - sleeping until next full hour"
+      - script.execute: sleep_to_next_hour
 
 # The actual `display:` block must come from Seeed's board package. The lambda
 # should simply blit the downloaded image at 0,0.
@@ -177,8 +177,31 @@ display:
     lambda: |-
       it.image(0, 0, id(dashboard_image));
 
+# Wake shortly after every full hour so events and prices that change on the
+# hour (and the hourly price bar) are already correct when the panel refreshes.
+# Falls back to ~55 min if SNTP has not provided a valid time yet.
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Helsinki
+
 # ── Core refresh logic ────────────────────────────────────────────────────────
 script:
+  - id: sleep_to_next_hour
+    mode: single
+    then:
+      - deep_sleep.enter:
+          id: deep_sleep_1
+          sleep_duration: !lambda |-
+            auto now = id(sntp_time).now();
+            if (!now.is_valid()) {
+              return 55 * 60 * 1000;
+            }
+            // Seconds to the next full hour, plus a small margin so the server
+            // (which re-renders on the hour) is ready.
+            uint32_t seconds = 3600 - (now.minute * 60 + now.second) + ${wake_margin_seconds};
+            return seconds * 1000;
+
   - id: refresh_image
     mode: single
     then:
